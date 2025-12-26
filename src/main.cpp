@@ -141,6 +141,37 @@ void handle_client(int client_fd) {
     send(client_fd, response.c_str(), response.size(), 0);
 }
 
+// -------- TYPE COMMAND LOGIC --------------
+
+else if (command == "TYPE" && tokens.size() == 2) {
+    std::lock_guard<std::mutex> lock(store_mutex);
+
+    auto it = store.find(tokens[1]);
+
+    // Key does not exist
+    if (it == store.end()) {
+        const char* none = "+none\r\n";
+        send(client_fd, none, strlen(none), 0);
+        continue;
+    }
+
+    Value& val = it->second;
+
+    // Check expiry
+    if (val.has_expiry &&
+        std::chrono::steady_clock::now() > val.expiry) {
+        store.erase(it);
+        const char* none = "+none\r\n";
+        send(client_fd, none, strlen(none), 0);
+        continue;
+    }
+
+    // Only strings supported for now
+    const char* type = "+string\r\n";
+    send(client_fd, type, strlen(type), 0);
+}
+
+
     }
 
     close(client_fd);
