@@ -51,6 +51,17 @@ std::vector<std::string> parse_resp(const std::string& input) {
     return result;
 }
 
+struct StreamEntry {
+    std::string id;
+    std::vector<std::pair<std::string, std::string>> fields;
+};
+
+std::unordered_map<std::string, std::vector<StreamEntry>> streams;
+
+bool is_valid_id(const std::string& id) {
+    return id.find('-') != std::string::npos;
+}
+
 
 void handle_client(int client_fd) {
     char buffer[1024];
@@ -170,6 +181,43 @@ else if (command == "TYPE" && tokens.size() == 2) {
     const char* type = "+string\r\n";
     send(client_fd, type, strlen(type), 0);
 }
+
+
+else if (command == "XADD" && tokens.size() >= 5) {
+    std::string stream_key = tokens[1];
+    std::string entry_id   = tokens[2];
+
+    // Validate ID
+    if (!is_valid_id(entry_id)) {
+        const char* err = "-ERR Invalid stream ID\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    // Validate field-value pairs
+    if ((tokens.size() - 3) % 2 != 0) {
+        const char* err = "-ERR wrong number of arguments\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    StreamEntry entry;
+    entry.id = entry_id;
+
+    for (size_t i = 3; i < tokens.size(); i += 2) {
+        entry.fields.push_back({tokens[i], tokens[i + 1]});
+    }
+
+    streams[stream_key].push_back(entry);
+
+    // Return the entry ID
+    std::string response =
+        "$" + std::to_string(entry_id.size()) + "\r\n" +
+        entry_id + "\r\n";
+
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
 
 
     }
