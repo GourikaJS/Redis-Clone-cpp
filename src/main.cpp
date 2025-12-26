@@ -26,7 +26,6 @@ void handle_client(int client_fd) {
 }
 
 
-int main(int argc, char **argv) {
   int main(int argc, char **argv) {
     // socket(), setsockopt(), bind(), listen() code above
 
@@ -48,5 +47,4 @@ int main(int argc, char **argv) {
 }
 
 
-  return 0;
-}
+ 
