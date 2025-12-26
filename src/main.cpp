@@ -157,30 +157,36 @@ void handle_client(int client_fd) {
 else if (command == "TYPE" && tokens.size() == 2) {
     std::lock_guard<std::mutex> lock(store_mutex);
 
-    auto it = store.find(tokens[1]);
+    const std::string& key = tokens[1];
 
-    // Key does not exist
-    if (it == store.end()) {
-        const char* none = "+none\r\n";
-        send(client_fd, none, strlen(none), 0);
+    // 1️⃣ Check strings
+    auto sit = store.find(key);
+    if (sit != store.end()) {
+        Value& val = sit->second;
+
+        // Expiry check
+        if (val.has_expiry &&
+            std::chrono::steady_clock::now() > val.expiry) {
+            store.erase(sit);
+        } else {
+            const char* type = "+string\r\n";
+            send(client_fd, type, strlen(type), 0);
+            continue;
+        }
+    }
+
+    // 2️⃣ Check streams
+    if (streams.find(key) != streams.end()) {
+        const char* type = "+stream\r\n";
+        send(client_fd, type, strlen(type), 0);
         continue;
     }
 
-    Value& val = it->second;
-
-    // Check expiry
-    if (val.has_expiry &&
-        std::chrono::steady_clock::now() > val.expiry) {
-        store.erase(it);
-        const char* none = "+none\r\n";
-        send(client_fd, none, strlen(none), 0);
-        continue;
-    }
-
-    // Only strings supported for now
-    const char* type = "+string\r\n";
-    send(client_fd, type, strlen(type), 0);
+    // 3️⃣ Not found
+    const char* none = "+none\r\n";
+    send(client_fd, none, strlen(none), 0);
 }
+
 
 
 else if (command == "XADD" && tokens.size() >= 5) {
