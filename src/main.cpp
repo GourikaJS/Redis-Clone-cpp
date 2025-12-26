@@ -13,17 +13,43 @@ void handle_client(int client_fd) {
     char buffer[1024];
 
     while (true) {
-        int bytes_read = read(client_fd, buffer, sizeof(buffer));
+        int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
         if (bytes_read <= 0) {
-            break; // client disconnected
+            break;
         }
 
-        const char* response = "+PONG\r\n";
-        send(client_fd, response, strlen(response), 0);
+        buffer[bytes_read] = '\0';
+        std::string input(buffer);
+
+        // Handle PING
+        if (input.find("PING") != std::string::npos) {
+            const char* pong = "+PONG\r\n";
+            send(client_fd, pong, strlen(pong), 0);
+        }
+
+        // Handle ECHO
+        else if (input.find("ECHO") != std::string::npos) {
+            // Very simple extraction: take last bulk string
+            size_t last_dollar = input.rfind('$');
+            size_t last_crlf = input.find("\r\n", last_dollar);
+
+            int len = std::stoi(input.substr(last_dollar + 1,
+                              last_crlf - last_dollar - 1));
+
+            std::string message =
+                input.substr(last_crlf + 2, len);
+
+            std::string response =
+                "$" + std::to_string(message.size()) +
+                "\r\n" + message + "\r\n";
+
+            send(client_fd, response.c_str(), response.size(), 0);
+        }
     }
 
     close(client_fd);
 }
+
 
 
   int main(int argc, char **argv) {
