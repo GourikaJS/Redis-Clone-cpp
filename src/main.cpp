@@ -62,6 +62,21 @@ bool is_valid_id(const std::string& id) {
     return id.find('-') != std::string::npos;
 }
 
+bool parse_id(const std::string& id, long long& ms, long long& seq) {
+    size_t dash = id.find('-');
+    if (dash == std::string::npos) return false;
+
+    try {
+        ms  = std::stoll(id.substr(0, dash));
+        seq = std::stoll(id.substr(dash + 1));
+    } catch (...) {
+        return false;
+    }
+
+    return ms >= 0 && seq >= 0;
+}
+
+
 
 void handle_client(int client_fd) {
     char buffer[1024];
@@ -188,25 +203,35 @@ else if (command == "TYPE" && tokens.size() == 2) {
 }
 
 
-
+// ------------- XADD ----------
 else if (command == "XADD" && tokens.size() >= 5) {
     std::string stream_key = tokens[1];
     std::string entry_id   = tokens[2];
 
-    // Validate ID
-    if (!is_valid_id(entry_id)) {
+    // ✅ STEP 1: Validate ID format
+    long long new_ms, new_seq;
+    if (!parse_id(entry_id, new_ms, new_seq)) {
         const char* err = "-ERR Invalid stream ID\r\n";
         send(client_fd, err, strlen(err), 0);
         continue;
     }
 
-    // Validate field-value pairs
-    if ((tokens.size() - 3) % 2 != 0) {
-        const char* err = "-ERR wrong number of arguments\r\n";
-        send(client_fd, err, strlen(err), 0);
-        continue;
+    // ✅ STEP 2: Validate ID ordering
+    auto& stream = streams[stream_key];
+    if (!stream.empty()) {
+        long long last_ms, last_seq;
+        parse_id(stream.back().id, last_ms, last_seq);
+
+        if (new_ms < last_ms ||
+            (new_ms == last_ms && new_seq <= last_seq)) {
+            const char* err =
+                "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
     }
 
+    // ✅ STEP 3: Create and insert entry
     StreamEntry entry;
     entry.id = entry_id;
 
@@ -214,17 +239,15 @@ else if (command == "XADD" && tokens.size() >= 5) {
         entry.fields.push_back({tokens[i], tokens[i + 1]});
     }
 
-    streams[stream_key].push_back(entry);
+    stream.push_back(entry);
 
-    // Return the entry ID
+    // ✅ STEP 4: Return entry ID
     std::string response =
         "$" + std::to_string(entry_id.size()) + "\r\n" +
         entry_id + "\r\n";
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
-
-
 
     }
 
