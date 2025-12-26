@@ -8,48 +8,103 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <thread>
+#include <unordered_map>
+#include <string>
+#include <mutex>
+
+std::unordered_map<std::string, std::string> store;
+std::mutex store_mutex;
+
+
+std::vector<std::string> parse_resp(const std::string& input) {
+    std::vector<std::string> result;
+    size_t i = 0;
+
+    // Skip "*<count>\r\n"
+    if (input[i] != '*') return result;
+    i = input.find("\r\n", i) + 2;
+
+    while (i < input.size()) {
+        if (input[i] != '$') break;
+
+        // Read length
+        size_t len_end = input.find("\r\n", i);
+        int len = std::stoi(input.substr(i + 1, len_end - i - 1));
+
+        // Read string
+        i = len_end + 2;
+        result.push_back(input.substr(i, len));
+
+        i += len + 2; // skip string + \r\n
+    }
+
+    return result;
+}
+
 
 void handle_client(int client_fd) {
     char buffer[1024];
 
     while (true) {
         int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-        if (bytes_read <= 0) {
-            break;
-        }
+        if (bytes_read <= 0) break;
 
         buffer[bytes_read] = '\0';
         std::string input(buffer);
 
-        // Handle PING
-        if (input.find("PING") != std::string::npos) {
+        auto tokens = parse_resp(input);
+        if (tokens.empty()) continue;
+
+        std::string command = tokens[0];
+
+        // Normalize command to uppercase
+        for (auto& c : command) c = toupper(c);
+
+        // ---------- PING ----------
+        if (command == "PING") {
             const char* pong = "+PONG\r\n";
             send(client_fd, pong, strlen(pong), 0);
         }
 
-        // Handle ECHO
-        else if (input.find("ECHO") != std::string::npos) {
-            // Very simple extraction: take last bulk string
-            size_t last_dollar = input.rfind('$');
-            size_t last_crlf = input.find("\r\n", last_dollar);
-
-            int len = std::stoi(input.substr(last_dollar + 1,
-                              last_crlf - last_dollar - 1));
-
-            std::string message =
-                input.substr(last_crlf + 2, len);
-
+        // ---------- ECHO ----------
+        else if (command == "ECHO" && tokens.size() == 2) {
+            std::string& msg = tokens[1];
             std::string response =
-                "$" + std::to_string(message.size()) +
-                "\r\n" + message + "\r\n";
+                "$" + std::to_string(msg.size()) + "\r\n" +
+                msg + "\r\n";
 
             send(client_fd, response.c_str(), response.size(), 0);
+        }
+
+        // ---------- SET ----------
+        else if (command == "SET" && tokens.size() == 3) {
+            std::lock_guard<std::mutex> lock(store_mutex);
+            store[tokens[1]] = tokens[2];
+
+            const char* ok = "+OK\r\n";
+            send(client_fd, ok, strlen(ok), 0);
+        }
+
+        // ---------- GET ----------
+        else if (command == "GET" && tokens.size() == 2) {
+            std::lock_guard<std::mutex> lock(store_mutex);
+
+            if (store.count(tokens[1])) {
+                std::string& val = store[tokens[1]];
+                std::string response =
+                    "$" + std::to_string(val.size()) + "\r\n" +
+                    val + "\r\n";
+
+                send(client_fd, response.c_str(), response.size(), 0);
+            } else {
+                const char* nil = "$-1\r\n";
+                send(client_fd, nil, strlen(nil), 0);
+            }
         }
     }
 
     close(client_fd);
 }
-
 
 
   int main(int argc, char **argv) {
