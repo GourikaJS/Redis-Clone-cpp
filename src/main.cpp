@@ -11,6 +11,8 @@
 #include <unordered_map>
 #include <string>
 #include <mutex>
+#include <vector>
+
 
 std::unordered_map<std::string, std::string> store;
 std::mutex store_mutex;
