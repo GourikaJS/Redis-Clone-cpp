@@ -12,9 +12,17 @@
 #include <string>
 #include <mutex>
 #include <vector>
+#include <chrono>
 
 
-std::unordered_map<std::string, std::string> store;
+
+struct Value {
+    std::string data;
+    std::chrono::steady_clock::time_point expiry;
+    bool has_expiry;
+};
+
+std::unordered_map<std::string, Value> store;
 std::mutex store_mutex;
 
 
@@ -79,30 +87,60 @@ void handle_client(int client_fd) {
         }
 
         // ---------- SET ----------
-        else if (command == "SET" && tokens.size() == 3) {
-            std::lock_guard<std::mutex> lock(store_mutex);
-            store[tokens[1]] = tokens[2];
+        else if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
+    std::lock_guard<std::mutex> lock(store_mutex);
 
-            const char* ok = "+OK\r\n";
-            send(client_fd, ok, strlen(ok), 0);
+    Value val;
+    val.data = tokens[2];
+    val.has_expiry = false;
+
+    if (tokens.size() == 5) {
+        std::string option = tokens[3];
+        for (auto& c : option) c = toupper(c);
+
+        if (option == "PX") {
+            int ttl_ms = std::stoi(tokens[4]);
+            val.expiry = std::chrono::steady_clock::now()
+                       + std::chrono::milliseconds(ttl_ms);
+            val.has_expiry = true;
         }
+    }
+
+    store[tokens[1]] = val;
+
+    const char* ok = "+OK\r\n";
+    send(client_fd, ok, strlen(ok), 0);
+}
+
 
         // ---------- GET ----------
         else if (command == "GET" && tokens.size() == 2) {
-            std::lock_guard<std::mutex> lock(store_mutex);
+    std::lock_guard<std::mutex> lock(store_mutex);
 
-            if (store.count(tokens[1])) {
-                std::string& val = store[tokens[1]];
-                std::string response =
-                    "$" + std::to_string(val.size()) + "\r\n" +
-                    val + "\r\n";
+    auto it = store.find(tokens[1]);
+    if (it == store.end()) {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
 
-                send(client_fd, response.c_str(), response.size(), 0);
-            } else {
-                const char* nil = "$-1\r\n";
-                send(client_fd, nil, strlen(nil), 0);
-            }
-        }
+    Value& val = it->second;
+
+    if (val.has_expiry &&
+        std::chrono::steady_clock::now() > val.expiry) {
+        store.erase(it);
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
+
+    std::string response =
+        "$" + std::to_string(val.data.size()) + "\r\n" +
+        val.data + "\r\n";
+
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
     }
 
     close(client_fd);
