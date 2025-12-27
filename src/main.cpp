@@ -261,9 +261,7 @@ for (size_t i = 3; i < tokens.size(); i += 2) {
 }
 
 streams[stream_key].push_back(entry);
-
-    // Insert
-    stream.push_back(entry);
+    
 
     // Return entry ID
     std::string response =
