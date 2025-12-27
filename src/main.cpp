@@ -208,68 +208,55 @@ else if (command == "XADD" && tokens.size() >= 5) {
     std::string stream_key = tokens[1];
     std::string entry_id   = tokens[2];
 
-    // ===============================
-    // ENTRY ID VALIDATION STARTS HERE
-    // ===============================
+    long long new_ms, new_seq;
+    if (!parse_id(entry_id, new_ms, new_seq)) {
+        const char* err = "-ERR Invalid stream ID\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
 
-   long long new_ms, new_seq;
-if (!parse_id(entry_id, new_ms, new_seq)) {
-    const char* err = "-ERR Invalid stream ID\r\n";
-    send(client_fd, err, strlen(err), 0);
-    continue;
-}
-
-auto it = streams.find(stream_key);
-
-// 🔹 Case 1: stream does NOT exist yet
-if (it == streams.end()) {
-    // First entry must be > 0-0
+    // 🔴 Rule 1: 0-0 is ALWAYS invalid (global rule)
     if (new_ms == 0 && new_seq == 0) {
         const char* err =
             "-ERR The ID specified in XADD must be greater than 0-0\r\n";
         send(client_fd, err, strlen(err), 0);
         continue;
     }
-}
-// 🔹 Case 2: stream exists → must be strictly increasing
-else {
-    auto& stream = it->second;
 
-    long long last_ms, last_seq;
-    parse_id(stream.back().id, last_ms, last_seq);
+    auto& stream = streams[stream_key];
 
-    if (new_ms < last_ms ||
-        (new_ms == last_ms && new_seq <= last_seq)) {
-        const char* err =
-            "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
-        send(client_fd, err, strlen(err), 0);
-        continue;
+    // 🔴 Rule 2: ID must be strictly increasing
+    if (!stream.empty()) {
+        auto& last = stream.back();
+        if (new_ms < last.ms ||
+            (new_ms == last.ms && new_seq <= last.seq)) {
+            const char* err =
+                "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
     }
-}
 
-
-    // ===============================
-    // ENTRY ID VALIDATION ENDS HERE
-    // ===============================
-
-    // Build entry (ONLY AFTER validation)
+    // ✅ Build entry ONLY after validation
     StreamEntry entry;
-entry.id = entry_id;
+    entry.id  = entry_id;
+    entry.ms  = new_ms;
+    entry.seq = new_seq;
 
-for (size_t i = 3; i < tokens.size(); i += 2) {
-    entry.fields.push_back({tokens[i], tokens[i + 1]});
-}
+    for (size_t i = 3; i + 1 < tokens.size(); i += 2) {
+        entry.fields.push_back({tokens[i], tokens[i + 1]});
+    }
 
-streams[stream_key].push_back(entry);
-    
+    stream.push_back(entry);
 
-    // Return entry ID
+    // ✅ Return entry ID (RESP bulk string)
     std::string response =
         "$" + std::to_string(entry_id.size()) + "\r\n" +
         entry_id + "\r\n";
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
+
     }
 
     close(client_fd);
