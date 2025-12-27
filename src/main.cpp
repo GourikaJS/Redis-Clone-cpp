@@ -53,8 +53,11 @@ std::vector<std::string> parse_resp(const std::string& input) {
 
 struct StreamEntry {
     std::string id;
+    long long ms;
+    long long seq;
     std::vector<std::pair<std::string, std::string>> fields;
 };
+
 
 std::unordered_map<std::string, std::vector<StreamEntry>> streams;
 
