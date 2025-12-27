@@ -208,7 +208,10 @@ else if (command == "XADD" && tokens.size() >= 5) {
     std::string stream_key = tokens[1];
     std::string entry_id   = tokens[2];
 
-    // ✅ STEP 1: Validate ID format
+    // ===============================
+    // ENTRY ID VALIDATION STARTS HERE
+    // ===============================
+
     long long new_ms, new_seq;
     if (!parse_id(entry_id, new_ms, new_seq)) {
         const char* err = "-ERR Invalid stream ID\r\n";
@@ -216,9 +219,19 @@ else if (command == "XADD" && tokens.size() >= 5) {
         continue;
     }
 
-    // ✅ STEP 2: Validate ID ordering
     auto& stream = streams[stream_key];
-    if (!stream.empty()) {
+
+    // Rule 1: first entry must be > 0-0
+    if (stream.empty()) {
+        if (new_ms == 0 && new_seq == 0) {
+            const char* err =
+                "-ERR The ID specified in XADD must be greater than 0-0\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
+    }
+    // Rule 2: must be strictly increasing
+    else {
         long long last_ms, last_seq;
         parse_id(stream.back().id, last_ms, last_seq);
 
@@ -231,7 +244,11 @@ else if (command == "XADD" && tokens.size() >= 5) {
         }
     }
 
-    // ✅ STEP 3: Create and insert entry
+    // ===============================
+    // ENTRY ID VALIDATION ENDS HERE
+    // ===============================
+
+    // Build entry (ONLY AFTER validation)
     StreamEntry entry;
     entry.id = entry_id;
 
@@ -239,16 +256,16 @@ else if (command == "XADD" && tokens.size() >= 5) {
         entry.fields.push_back({tokens[i], tokens[i + 1]});
     }
 
+    // Insert
     stream.push_back(entry);
 
-    // ✅ STEP 4: Return entry ID
+    // Return entry ID
     std::string response =
         "$" + std::to_string(entry_id.size()) + "\r\n" +
         entry_id + "\r\n";
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
-
     }
 
     close(client_fd);
