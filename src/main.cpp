@@ -213,42 +213,53 @@ else if (command == "XADD" && tokens.size() >= 5) {
     std::string raw_id     = tokens[2];
 
     long long new_ms, new_seq;
+    bool auto_ms  = false;
     bool auto_seq = false;
 
     // ---------- Parse ID ----------
-    size_t dash = raw_id.find('-');
-    if (dash == std::string::npos) {
-        const char* err = "-ERR Invalid stream ID\r\n";
-        send(client_fd, err, strlen(err), 0);
-        continue;
-    }
-
-    std::string ms_part  = raw_id.substr(0, dash);
-    std::string seq_part = raw_id.substr(dash + 1);
-
-    try {
-        new_ms = std::stoll(ms_part);
-    } catch (...) {
-        const char* err = "-ERR Invalid stream ID\r\n";
-        send(client_fd, err, strlen(err), 0);
-        continue;
-    }
-
-    if (seq_part == "*") {
+    if (raw_id == "*") {
+        auto_ms  = true;
         auto_seq = true;
     } else {
+        size_t dash = raw_id.find('-');
+        if (dash == std::string::npos) {
+            const char* err = "-ERR Invalid stream ID\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
+
+        std::string ms_part  = raw_id.substr(0, dash);
+        std::string seq_part = raw_id.substr(dash + 1);
+
         try {
-            new_seq = std::stoll(seq_part);
+            new_ms = std::stoll(ms_part);
         } catch (...) {
             const char* err = "-ERR Invalid stream ID\r\n";
             send(client_fd, err, strlen(err), 0);
             continue;
         }
+
+        if (seq_part == "*") {
+            auto_seq = true;
+        } else {
+            try {
+                new_seq = std::stoll(seq_part);
+            } catch (...) {
+                const char* err = "-ERR Invalid stream ID\r\n";
+                send(client_fd, err, strlen(err), 0);
+                continue;
+            }
+        }
     }
 
     auto& stream = streams[stream_key];
 
-    // ---------- Auto-generate sequence (ms-*) ----------
+    // ---------- Auto-generate ms (for *) ----------
+    if (auto_ms) {
+        new_ms = current_time_ms();
+    }
+
+    // ---------- Auto-generate seq ----------
     if (auto_seq) {
         if (stream.empty()) {
             new_seq = (new_ms == 0 ? 1 : 0);
@@ -286,7 +297,7 @@ else if (command == "XADD" && tokens.size() >= 5) {
     std::string entry_id =
         std::to_string(new_ms) + "-" + std::to_string(new_seq);
 
-    // ---------- Build stream entry ----------
+    // ---------- Build entry ----------
     StreamEntry entry;
     entry.id  = entry_id;
     entry.ms  = new_ms;
@@ -306,6 +317,7 @@ else if (command == "XADD" && tokens.size() >= 5) {
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
+
 
     }
 
