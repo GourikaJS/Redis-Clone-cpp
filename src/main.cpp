@@ -393,6 +393,79 @@ else if (command == "XRANGE" && tokens.size() == 4) {
     send(client_fd, response.c_str(), response.size(), 0);
 }
 
+// ------------- XREAD -----------------
+else if (command == "XREAD" && tokens.size() == 4 && tokens[1] == "STREAMS") {
+
+    std::string stream_key = tokens[2];
+    std::string last_id    = tokens[3];
+
+    // If stream does not exist → empty array
+    if (streams.find(stream_key) == streams.end()) {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+        continue;
+    }
+
+    auto& stream = streams[stream_key];
+
+    // Parse last ID
+    size_t dash = last_id.find('-');
+    long long last_ms = 0, last_seq = 0;
+
+    if (dash != std::string::npos) {
+        last_ms  = std::stoll(last_id.substr(0, dash));
+        last_seq = std::stoll(last_id.substr(dash + 1));
+    }
+
+    std::string response;
+    std::vector<StreamEntry> result;
+
+    // Collect entries with ID > last_id
+    for (auto& e : stream) {
+        if (e.ms > last_ms ||
+            (e.ms == last_ms && e.seq > last_seq)) {
+            result.push_back(e);
+        }
+    }
+
+    // If no entries → empty array
+    if (result.empty()) {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+        continue;
+    }
+
+    // RESP format:
+    // *1
+    // *2
+    // $<stream_key>
+    // *<num_entries>
+    response += "*1\r\n";
+    response += "*2\r\n";
+    response += "$" + std::to_string(stream_key.size()) + "\r\n";
+    response += stream_key + "\r\n";
+    response += "*" + std::to_string(result.size()) + "\r\n";
+
+    for (auto& e : result) {
+        response += "*2\r\n";
+
+        // Entry ID
+        response += "$" + std::to_string(e.id.size()) + "\r\n";
+        response += e.id + "\r\n";
+
+        // Fields
+        response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+        for (auto& kv : e.fields) {
+            response += "$" + std::to_string(kv.first.size()) + "\r\n";
+            response += kv.first + "\r\n";
+            response += "$" + std::to_string(kv.second.size()) + "\r\n";
+            response += kv.second + "\r\n";
+        }
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
 
 
     }
