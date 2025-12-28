@@ -13,6 +13,7 @@
 #include <mutex>
 #include <vector>
 #include <chrono>
+#include <climits>
 
 
 
@@ -219,7 +220,7 @@ else if (command == "XRANGE" && tokens.size() == 4) {
     std::string start_id   = tokens[2];
     std::string end_id     = tokens[3];
 
-    // If stream does not exist → empty array
+    // Stream does not exist → empty array
     if (streams.find(stream_key) == streams.end()) {
         const char* empty = "*0\r\n";
         send(client_fd, empty, strlen(empty), 0);
@@ -228,49 +229,40 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
     auto& stream = streams[stream_key];
 
-    // Helpers to convert special IDs
-    auto id_to_pair = [](const std::string& id) -> std::pair<long long, long long> {
-        if (id == "-") return {LLONG_MIN, LLONG_MIN};
-        if (id == "+") return {LLONG_MAX, LLONG_MAX};
+    auto parse = [](const std::string& id) {
+        if (id == "-") return std::make_pair(0LL, 0LL);
+        if (id == "+") return std::make_pair(LLONG_MAX, LLONG_MAX);
 
         size_t dash = id.find('-');
-        long long ms  = std::stoll(id.substr(0, dash));
-        long long seq = std::stoll(id.substr(dash + 1));
-        return {ms, seq};
+        return std::make_pair(
+            std::stoll(id.substr(0, dash)),
+            std::stoll(id.substr(dash + 1))
+        );
     };
 
-    auto start = id_to_pair(start_id);
-    auto end   = id_to_pair(end_id);
+    auto start = parse(start_id);
+    auto end   = parse(end_id);
 
     std::string response;
     int count = 0;
 
-    // First pass: count matching entries
-    for (auto& entry : stream) {
-        std::pair<long long, long long> eid = {entry.ms, entry.seq};
-        if (eid >= start && eid <= end) {
-            count++;
-        }
+    for (auto& e : stream) {
+        std::pair<long long, long long> id = {e.ms, e.seq};
+        if (id >= start && id <= end) count++;
     }
 
-    // RESP array header
     response += "*" + std::to_string(count) + "\r\n";
 
-    // Second pass: build response
-    for (auto& entry : stream) {
-        std::pair<long long, long long> eid = {entry.ms, entry.seq};
-        if (eid < start || eid > end) continue;
+    for (auto& e : stream) {
+        std::pair<long long, long long> id = {e.ms, e.seq};
+        if (id < start || id > end) continue;
 
-        // Each entry is an array of [id, field-value array]
         response += "*2\r\n";
+        response += "$" + std::to_string(e.id.size()) + "\r\n";
+        response += e.id + "\r\n";
 
-        // ID
-        response += "$" + std::to_string(entry.id.size()) + "\r\n";
-        response += entry.id + "\r\n";
-
-        // Fields
-        response += "*" + std::to_string(entry.fields.size() * 2) + "\r\n";
-        for (auto& kv : entry.fields) {
+        response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+        for (auto& kv : e.fields) {
             response += "$" + std::to_string(kv.first.size()) + "\r\n";
             response += kv.first + "\r\n";
             response += "$" + std::to_string(kv.second.size()) + "\r\n";
@@ -280,11 +272,7 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
-
-
-
     }
-
     close(client_fd);
 }
 
