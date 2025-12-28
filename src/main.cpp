@@ -393,8 +393,18 @@ else if (command == "XRANGE" && tokens.size() == 4) {
     send(client_fd, response.c_str(), response.size(), 0);
 }
 
-// ------------- XREAD -----------------
-else if (command == "XREAD" && tokens.size() == 4 && tokens[1] == "STREAMS") {
+
+// --------- XREAD -----------
+else if (command == "XREAD" && tokens.size() == 4) {
+
+std::string subcmd = tokens[1];
+    for (auto& c : subcmd) c = toupper(c);
+
+    if (subcmd != "STREAMS") {
+        const char* err = "-ERR syntax error\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
 
     std::string stream_key = tokens[2];
     std::string last_id    = tokens[3];
@@ -465,8 +475,6 @@ else if (command == "XREAD" && tokens.size() == 4 && tokens[1] == "STREAMS") {
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
-
-
 
     }
     close(client_fd);
