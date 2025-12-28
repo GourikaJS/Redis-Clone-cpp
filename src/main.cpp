@@ -208,17 +208,61 @@ else if (command == "TYPE" && tokens.size() == 2) {
 
 // ------------- XADD ----------
 else if (command == "XADD" && tokens.size() >= 5) {
+
     std::string stream_key = tokens[1];
-    std::string entry_id   = tokens[2];
+    std::string raw_id     = tokens[2];
 
     long long new_ms, new_seq;
-    if (!parse_id(entry_id, new_ms, new_seq)) {
+    bool auto_seq = false;
+
+    // ---------- Parse ID ----------
+    size_t dash = raw_id.find('-');
+    if (dash == std::string::npos) {
         const char* err = "-ERR Invalid stream ID\r\n";
         send(client_fd, err, strlen(err), 0);
         continue;
     }
 
-    // 🔴 Rule 1: 0-0 is ALWAYS invalid (global rule)
+    std::string ms_part  = raw_id.substr(0, dash);
+    std::string seq_part = raw_id.substr(dash + 1);
+
+    try {
+        new_ms = std::stoll(ms_part);
+    } catch (...) {
+        const char* err = "-ERR Invalid stream ID\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    if (seq_part == "*") {
+        auto_seq = true;
+    } else {
+        try {
+            new_seq = std::stoll(seq_part);
+        } catch (...) {
+            const char* err = "-ERR Invalid stream ID\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
+    }
+
+    auto& stream = streams[stream_key];
+
+    // ---------- Auto-generate sequence (ms-*) ----------
+    if (auto_seq) {
+        if (stream.empty()) {
+            new_seq = (new_ms == 0 ? 1 : 0);
+        } else {
+            auto& last = stream.back();
+            if (last.ms == new_ms) {
+                new_seq = last.seq + 1;
+            } else {
+                new_seq = (new_ms == 0 ? 1 : 0);
+            }
+        }
+    }
+
+    // ---------- Redis rule: 0-0 is always invalid ----------
     if (new_ms == 0 && new_seq == 0) {
         const char* err =
             "-ERR The ID specified in XADD must be greater than 0-0\r\n";
@@ -226,9 +270,7 @@ else if (command == "XADD" && tokens.size() >= 5) {
         continue;
     }
 
-    auto& stream = streams[stream_key];
-
-    // 🔴 Rule 2: ID must be strictly increasing
+    // ---------- ID must be strictly increasing ----------
     if (!stream.empty()) {
         auto& last = stream.back();
         if (new_ms < last.ms ||
@@ -240,7 +282,11 @@ else if (command == "XADD" && tokens.size() >= 5) {
         }
     }
 
-    // ✅ Build entry ONLY after validation
+    // ---------- Build final ID ----------
+    std::string entry_id =
+        std::to_string(new_ms) + "-" + std::to_string(new_seq);
+
+    // ---------- Build stream entry ----------
     StreamEntry entry;
     entry.id  = entry_id;
     entry.ms  = new_ms;
@@ -250,9 +296,10 @@ else if (command == "XADD" && tokens.size() >= 5) {
         entry.fields.push_back({tokens[i], tokens[i + 1]});
     }
 
+    // ---------- Insert ----------
     stream.push_back(entry);
 
-    // ✅ Return entry ID (RESP bulk string)
+    // ---------- Return ID ----------
     std::string response =
         "$" + std::to_string(entry_id.size()) + "\r\n" +
         entry_id + "\r\n";
