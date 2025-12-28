@@ -79,6 +79,12 @@ bool parse_id(const std::string& id, long long& ms, long long& seq) {
     return ms >= 0 && seq >= 0;
 }
 
+long long current_time_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(
+        system_clock::now().time_since_epoch()
+    ).count();
+}
 
 
 void handle_client(int client_fd) {
