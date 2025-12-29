@@ -169,7 +169,7 @@ void handle_client(int client_fd) {
 
     auto it = store.find(tokens[1]);
     if (it == store.end()) {
-        const char* nil = "$-1\r\n";
+        const char* nil = "*0\r\n";
         send(client_fd, nil, strlen(nil), 0);
         continue;
     }
@@ -179,7 +179,7 @@ void handle_client(int client_fd) {
     if (val.has_expiry &&
         std::chrono::steady_clock::now() > val.expiry) {
         store.erase(it);
-        const char* nil = "$-1\r\n";
+        const char* nil = "*0\r\n";
         send(client_fd, nil, strlen(nil), 0);
         continue;
     }
@@ -445,7 +445,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 
     while (true) {
 
-        // ---------- Collect results FIRST ----------
+        // ---------- Collect results ----------
         struct Result {
             std::string key;
             std::vector<StreamEntry> entries;
@@ -459,7 +459,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             long long last_ms = 0, last_seq = 0;
             size_t dash = ids[i].find('-');
             if (dash != std::string::npos) {
-                last_ms = std::stoll(ids[i].substr(0, dash));
+                last_ms  = std::stoll(ids[i].substr(0, dash));
                 last_seq = std::stoll(ids[i].substr(dash + 1));
             }
 
@@ -505,6 +505,25 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             break;
         }
 
+        // ---------- No data ----------
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count();
+
+        if (block_ms < 0 || elapsed >= block_ms) {
+            const char* empty = "*0\r\n";
+            send(client_fd, empty, strlen(empty), 0);
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+            send(client_fd, response.c_str(), response.size(), 0);
+            break;
+        }
+
         // ---------- Non-blocking ----------
         if (block_ms < 0) {
             const char* empty = "*0\r\n";
@@ -519,7 +538,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             ).count();
 
         if (elapsed >= block_ms) {
-            const char* nil = "$-1\r\n";   // correct for BLOCK timeout
+            const char* nil = "*0\r\n";   // correct for BLOCK timeout
             send(client_fd, nil, strlen(nil), 0);
             break;
         }
