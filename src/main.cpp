@@ -87,6 +87,20 @@ long long current_time_ms() {
     ).count();
 }
 
+bool has_new_entries(
+    const std::vector<StreamEntry>& stream,
+    long long last_ms,
+    long long last_seq
+) {
+    for (auto& e : stream) {
+        if (e.ms > last_ms ||
+            (e.ms == last_ms && e.seq > last_seq)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 
 void handle_client(int client_fd) {
     char buffer[1024];
@@ -397,107 +411,133 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 // --------- XREAD -----------
 else if (command == "XREAD" && tokens.size() >= 4) {
 
-    // Normalize subcommand
-    std::string subcmd = tokens[1];
-    for (auto& c : subcmd) c = toupper(c);
+    int idx = 1;
+    long long block_ms = -1;
 
+    // ---------- Parse BLOCK ----------
+    if (tokens[idx] == "BLOCK" || tokens[idx] == "block") {
+        block_ms = std::stoll(tokens[idx + 1]);
+        idx += 2;
+    }
+
+    // ---------- Parse STREAMS ----------
+    std::string subcmd = tokens[idx];
+    for (auto& c : subcmd) c = toupper(c);
     if (subcmd != "STREAMS") {
         const char* err = "-ERR syntax error\r\n";
         send(client_fd, err, strlen(err), 0);
         continue;
     }
+    idx++;
 
-    int n = (tokens.size() - 2) / 2;
-    if (tokens.size() != 2 + n * 2) {
-        const char* err = "-ERR syntax error\r\n";
-        send(client_fd, err, strlen(err), 0);
-        continue;
-    }
+    int remaining = tokens.size() - idx;
+    int n = remaining / 2;
 
-    std::vector<std::string> stream_keys;
-    std::vector<std::string> last_ids;
+    std::vector<std::string> keys;
+    std::vector<std::string> ids;
 
-    for (int i = 0; i < n; i++) {
-        stream_keys.push_back(tokens[2 + i]);
-        last_ids.push_back(tokens[2 + n + i]);
-    }
+    for (int i = 0; i < n; i++)
+        keys.push_back(tokens[idx + i]);
+    for (int i = 0; i < n; i++)
+        ids.push_back(tokens[idx + n + i]);
 
-    std::string response;
-    int streams_with_data = 0;
+    auto start_time = std::chrono::steady_clock::now();
 
-    // First pass: determine how many streams have data
-    for (int i = 0; i < n; i++) {
-        auto it = streams.find(stream_keys[i]);
-        if (it == streams.end()) continue;
+    while (true) {
 
-        size_t dash = last_ids[i].find('-');
-        long long last_ms = 0, last_seq = 0;
-        if (dash != std::string::npos) {
-            last_ms  = std::stoll(last_ids[i].substr(0, dash));
-            last_seq = std::stoll(last_ids[i].substr(dash + 1));
-        }
+        std::string response;
+        int streams_with_data = 0;
 
-        for (auto& e : it->second) {
-            if (e.ms > last_ms ||
-                (e.ms == last_ms && e.seq > last_seq)) {
+        // ---------- First pass: detect data ----------
+        for (int i = 0; i < n; i++) {
+            auto it = streams.find(keys[i]);
+            if (it == streams.end()) continue;
+
+            size_t dash = ids[i].find('-');
+            long long last_ms = 0, last_seq = 0;
+            if (dash != std::string::npos) {
+                last_ms  = std::stoll(ids[i].substr(0, dash));
+                last_seq = std::stoll(ids[i].substr(dash + 1));
+            }
+
+            if (has_new_entries(it->second, last_ms, last_seq)) {
                 streams_with_data++;
-                break;
-            }
-        }
-    }
-
-    if (streams_with_data == 0) {
-        const char* empty = "*0\r\n";
-        send(client_fd, empty, strlen(empty), 0);
-        continue;
-    }
-
-    response += "*" + std::to_string(streams_with_data) + "\r\n";
-
-    // Second pass: build response
-    for (int i = 0; i < n; i++) {
-        auto it = streams.find(stream_keys[i]);
-        if (it == streams.end()) continue;
-
-        size_t dash = last_ids[i].find('-');
-        long long last_ms = 0, last_seq = 0;
-        if (dash != std::string::npos) {
-            last_ms  = std::stoll(last_ids[i].substr(0, dash));
-            last_seq = std::stoll(last_ids[i].substr(dash + 1));
-        }
-
-        std::vector<StreamEntry> entries;
-        for (auto& e : it->second) {
-            if (e.ms > last_ms ||
-                (e.ms == last_ms && e.seq > last_seq)) {
-                entries.push_back(e);
             }
         }
 
-        if (entries.empty()) continue;
+        // ---------- Data found ----------
+        if (streams_with_data > 0) {
+            response += "*" + std::to_string(streams_with_data) + "\r\n";
 
-        response += "*2\r\n";
-        response += "$" + std::to_string(stream_keys[i].size()) + "\r\n";
-        response += stream_keys[i] + "\r\n";
-        response += "*" + std::to_string(entries.size()) + "\r\n";
+            for (int i = 0; i < n; i++) {
+                auto it = streams.find(keys[i]);
+                if (it == streams.end()) continue;
 
-        for (auto& e : entries) {
-            response += "*2\r\n";
-            response += "$" + std::to_string(e.id.size()) + "\r\n";
-            response += e.id + "\r\n";
+                size_t dash = ids[i].find('-');
+                long long last_ms = 0, last_seq = 0;
+                if (dash != std::string::npos) {
+                    last_ms  = std::stoll(ids[i].substr(0, dash));
+                    last_seq = std::stoll(ids[i].substr(dash + 1));
+                }
 
-            response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-            for (auto& kv : e.fields) {
-                response += "$" + std::to_string(kv.first.size()) + "\r\n";
-                response += kv.first + "\r\n";
-                response += "$" + std::to_string(kv.second.size()) + "\r\n";
-                response += kv.second + "\r\n";
+                std::vector<StreamEntry> entries;
+                for (auto& e : it->second) {
+                    if (e.ms > last_ms ||
+                        (e.ms == last_ms && e.seq > last_seq)) {
+                        entries.push_back(e);
+                    }
+                }
+
+                if (entries.empty()) continue;
+
+                response += "*2\r\n";
+                response += "$" + std::to_string(keys[i].size()) + "\r\n";
+                response += keys[i] + "\r\n";
+                response += "*" + std::to_string(entries.size()) + "\r\n";
+
+                for (auto& e : entries) {
+                    response += "*2\r\n";
+                    response += "$" + std::to_string(e.id.size()) + "\r\n";
+                    response += e.id + "\r\n";
+
+                    response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+                    for (auto& kv : e.fields) {
+                        response += "$" + std::to_string(kv.first.size()) + "\r\n";
+                        response += kv.first + "\r\n";
+                        response += "$" + std::to_string(kv.second.size()) + "\r\n";
+                        response += kv.second + "\r\n";
+                    }
+                }
             }
-        }
-    }
 
-    send(client_fd, response.c_str(), response.size(), 0);
+            send(client_fd, response.c_str(), response.size(), 0);
+            break;
+        }
+
+        // ---------- Non-blocking ----------
+        if (block_ms < 0) {
+            const char* empty = "*0\r\n";
+            send(client_fd, empty, strlen(empty), 0);
+            break;
+        }
+
+        // ---------- Timeout ----------
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count();
+
+        if (elapsed >= block_ms) {
+            const char* empty = "*0\r\n";
+            send(client_fd, empty, strlen(empty), 0);
+            break;
+        }
+
+        // ---------- Sleep briefly ----------
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
 }
+
 
 
     }
