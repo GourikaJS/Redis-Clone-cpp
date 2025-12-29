@@ -395,9 +395,10 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
 
 // --------- XREAD -----------
-else if (command == "XREAD" && tokens.size() == 4) {
+else if (command == "XREAD" && tokens.size() >= 4) {
 
-std::string subcmd = tokens[1];
+    // Normalize subcommand
+    std::string subcmd = tokens[1];
     for (auto& c : subcmd) c = toupper(c);
 
     if (subcmd != "STREAMS") {
@@ -406,75 +407,98 @@ std::string subcmd = tokens[1];
         continue;
     }
 
-    std::string stream_key = tokens[2];
-    std::string last_id    = tokens[3];
-
-    // If stream does not exist → empty array
-    if (streams.find(stream_key) == streams.end()) {
-        const char* empty = "*0\r\n";
-        send(client_fd, empty, strlen(empty), 0);
+    int n = (tokens.size() - 2) / 2;
+    if (tokens.size() != 2 + n * 2) {
+        const char* err = "-ERR syntax error\r\n";
+        send(client_fd, err, strlen(err), 0);
         continue;
     }
 
-    auto& stream = streams[stream_key];
+    std::vector<std::string> stream_keys;
+    std::vector<std::string> last_ids;
 
-    // Parse last ID
-    size_t dash = last_id.find('-');
-    long long last_ms = 0, last_seq = 0;
-
-    if (dash != std::string::npos) {
-        last_ms  = std::stoll(last_id.substr(0, dash));
-        last_seq = std::stoll(last_id.substr(dash + 1));
+    for (int i = 0; i < n; i++) {
+        stream_keys.push_back(tokens[2 + i]);
+        last_ids.push_back(tokens[2 + n + i]);
     }
 
     std::string response;
-    std::vector<StreamEntry> result;
+    int streams_with_data = 0;
 
-    // Collect entries with ID > last_id
-    for (auto& e : stream) {
-        if (e.ms > last_ms ||
-            (e.ms == last_ms && e.seq > last_seq)) {
-            result.push_back(e);
+    // First pass: determine how many streams have data
+    for (int i = 0; i < n; i++) {
+        auto it = streams.find(stream_keys[i]);
+        if (it == streams.end()) continue;
+
+        size_t dash = last_ids[i].find('-');
+        long long last_ms = 0, last_seq = 0;
+        if (dash != std::string::npos) {
+            last_ms  = std::stoll(last_ids[i].substr(0, dash));
+            last_seq = std::stoll(last_ids[i].substr(dash + 1));
+        }
+
+        for (auto& e : it->second) {
+            if (e.ms > last_ms ||
+                (e.ms == last_ms && e.seq > last_seq)) {
+                streams_with_data++;
+                break;
+            }
         }
     }
 
-    // If no entries → empty array
-    if (result.empty()) {
+    if (streams_with_data == 0) {
         const char* empty = "*0\r\n";
         send(client_fd, empty, strlen(empty), 0);
         continue;
     }
 
-    // RESP format:
-    // *1
-    // *2
-    // $<stream_key>
-    // *<num_entries>
-    response += "*1\r\n";
-    response += "*2\r\n";
-    response += "$" + std::to_string(stream_key.size()) + "\r\n";
-    response += stream_key + "\r\n";
-    response += "*" + std::to_string(result.size()) + "\r\n";
+    response += "*" + std::to_string(streams_with_data) + "\r\n";
 
-    for (auto& e : result) {
+    // Second pass: build response
+    for (int i = 0; i < n; i++) {
+        auto it = streams.find(stream_keys[i]);
+        if (it == streams.end()) continue;
+
+        size_t dash = last_ids[i].find('-');
+        long long last_ms = 0, last_seq = 0;
+        if (dash != std::string::npos) {
+            last_ms  = std::stoll(last_ids[i].substr(0, dash));
+            last_seq = std::stoll(last_ids[i].substr(dash + 1));
+        }
+
+        std::vector<StreamEntry> entries;
+        for (auto& e : it->second) {
+            if (e.ms > last_ms ||
+                (e.ms == last_ms && e.seq > last_seq)) {
+                entries.push_back(e);
+            }
+        }
+
+        if (entries.empty()) continue;
+
         response += "*2\r\n";
+        response += "$" + std::to_string(stream_keys[i].size()) + "\r\n";
+        response += stream_keys[i] + "\r\n";
+        response += "*" + std::to_string(entries.size()) + "\r\n";
 
-        // Entry ID
-        response += "$" + std::to_string(e.id.size()) + "\r\n";
-        response += e.id + "\r\n";
+        for (auto& e : entries) {
+            response += "*2\r\n";
+            response += "$" + std::to_string(e.id.size()) + "\r\n";
+            response += e.id + "\r\n";
 
-        // Fields
-        response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-        for (auto& kv : e.fields) {
-            response += "$" + std::to_string(kv.first.size()) + "\r\n";
-            response += kv.first + "\r\n";
-            response += "$" + std::to_string(kv.second.size()) + "\r\n";
-            response += kv.second + "\r\n";
+            response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+            for (auto& kv : e.fields) {
+                response += "$" + std::to_string(kv.first.size()) + "\r\n";
+                response += kv.first + "\r\n";
+                response += "$" + std::to_string(kv.second.size()) + "\r\n";
+                response += kv.second + "\r\n";
+            }
         }
     }
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
+
 
     }
     close(client_fd);
