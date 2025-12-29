@@ -411,8 +411,6 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 // --------- XREAD -----------
 
 else if (command == "XREAD" && tokens.size() >= 4) {
-    bool waited = false;
-
     int idx = 1;
     long long block_ms = -1;
 
@@ -424,7 +422,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 
     // ---------- Parse STREAMS ----------
     std::string subcmd = tokens[idx];
-    for (auto& c : subcmd) c = toupper(c);
+    for (char &c : subcmd) c = toupper(c);
     if (subcmd != "STREAMS") {
         const char* err = "-ERR syntax error\r\n";
         send(client_fd, err, strlen(err), 0);
@@ -447,63 +445,54 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 
     while (true) {
 
-        std::string response;
-        int streams_with_data = 0;
+        // ---------- Collect results FIRST ----------
+        struct Result {
+            std::string key;
+            std::vector<StreamEntry> entries;
+        };
+        std::vector<Result> results;
 
-        // ---------- First pass: detect data ----------
         for (int i = 0; i < n; i++) {
             auto it = streams.find(keys[i]);
             if (it == streams.end()) continue;
 
-            size_t dash = ids[i].find('-');
             long long last_ms = 0, last_seq = 0;
+            size_t dash = ids[i].find('-');
             if (dash != std::string::npos) {
-                last_ms  = std::stoll(ids[i].substr(0, dash));
+                last_ms = std::stoll(ids[i].substr(0, dash));
                 last_seq = std::stoll(ids[i].substr(dash + 1));
             }
 
-            if (has_new_entries(it->second, last_ms, last_seq)) {
-                streams_with_data++;
+            std::vector<StreamEntry> entries;
+            for (auto &e : it->second) {
+                if (e.ms > last_ms || (e.ms == last_ms && e.seq > last_seq)) {
+                    entries.push_back(e);
+                }
+            }
+
+            if (!entries.empty()) {
+                results.push_back({keys[i], entries});
             }
         }
 
         // ---------- Data found ----------
-        if (streams_with_data > 0) {
-            response += "*" + std::to_string(streams_with_data) + "\r\n";
+        if (!results.empty()) {
+            std::string response;
+            response += "*" + std::to_string(results.size()) + "\r\n";
 
-            for (int i = 0; i < n; i++) {
-                auto it = streams.find(keys[i]);
-                if (it == streams.end()) continue;
-
-                size_t dash = ids[i].find('-');
-                long long last_ms = 0, last_seq = 0;
-                if (dash != std::string::npos) {
-                    last_ms  = std::stoll(ids[i].substr(0, dash));
-                    last_seq = std::stoll(ids[i].substr(dash + 1));
-                }
-
-                std::vector<StreamEntry> entries;
-                for (auto& e : it->second) {
-                    if (e.ms > last_ms ||
-                        (e.ms == last_ms && e.seq > last_seq)) {
-                        entries.push_back(e);
-                    }
-                }
-
-                if (entries.empty()) continue;
-
+            for (auto &r : results) {
                 response += "*2\r\n";
-                response += "$" + std::to_string(keys[i].size()) + "\r\n";
-                response += keys[i] + "\r\n";
-                response += "*" + std::to_string(entries.size()) + "\r\n";
+                response += "$" + std::to_string(r.key.size()) + "\r\n";
+                response += r.key + "\r\n";
 
-                for (auto& e : entries) {
+                response += "*" + std::to_string(r.entries.size()) + "\r\n";
+                for (auto &e : r.entries) {
                     response += "*2\r\n";
                     response += "$" + std::to_string(e.id.size()) + "\r\n";
                     response += e.id + "\r\n";
 
                     response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-                    for (auto& kv : e.fields) {
+                    for (auto &kv : e.fields) {
                         response += "$" + std::to_string(kv.first.size()) + "\r\n";
                         response += kv.first + "\r\n";
                         response += "$" + std::to_string(kv.second.size()) + "\r\n";
@@ -522,32 +511,22 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             send(client_fd, empty, strlen(empty), 0);
             break;
         }
-// ---------- Timeout ----------
-auto elapsed =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time
-    ).count();
 
-if (elapsed >= block_ms) {
-    if (block_ms > 0 && waited) {
-        // BLOCK > 0 and we actually waited
-        const char* nil = "$-1\r\n";
-        send(client_fd, nil, strlen(nil), 0);
-    } else {
-        // Non-blocking, BLOCK 0, or no wait yet
-        const char* empty = "*0\r\n";
-        send(client_fd, empty, strlen(empty), 0);
-    }
-    break;
-}
+        // ---------- Blocking timeout ----------
+        auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count();
 
-// ---------- Sleep ----------
-waited = true;
-std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        if (elapsed >= block_ms) {
+            const char* nil = "$-1\r\n";   // correct for BLOCK timeout
+            send(client_fd, nil, strlen(nil), 0);
+            break;
+        }
 
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
-
 
 
     }
