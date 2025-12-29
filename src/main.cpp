@@ -528,10 +528,10 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             ).count();
 
         if (elapsed >= block_ms) {
-            const char* empty = "*0\r\n";
-            send(client_fd, empty, strlen(empty), 0);
-            break;
-        }
+    const char* nil = "$-1\r\n";
+    send(client_fd, nil, strlen(nil), 0);
+    break;
+}
 
         // ---------- Sleep briefly ----------
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
