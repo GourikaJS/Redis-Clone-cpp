@@ -520,33 +520,6 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
-            send(client_fd, response.c_str(), response.size(), 0);
-            break;
-        }
-
-        // ---------- Non-blocking ----------
-        if (block_ms < 0) {
-            const char* empty = "*0\r\n";
-            send(client_fd, empty, strlen(empty), 0);
-            break;
-        }
-
-        // ---------- Blocking timeout ----------
-        auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start_time
-            ).count();
-
-        if (elapsed >= block_ms) {
-            const char* nil = "*0\r\n";   // correct for BLOCK timeout
-            send(client_fd, nil, strlen(nil), 0);
-            break;
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    }
-}
-
 
     }
     close(client_fd);
