@@ -511,11 +511,20 @@ else if (command == "XREAD" && tokens.size() >= 4) {
                 std::chrono::steady_clock::now() - start_time
             ).count();
 
-        if (block_ms < 0 || elapsed >= block_ms) {
-            const char* empty = "*0\r\n";
-            send(client_fd, empty, strlen(empty), 0);
-            break;
-        }
+        // ---------- Non-blocking ----------
+if (block_ms < 0) {
+    const char* empty = "*0\r\n";
+    send(client_fd, empty, strlen(empty), 0);
+    break;
+}
+
+// ---------- BLOCK timeout ----------
+if (elapsed >= block_ms) {
+    const char* nil = "$-1\r\n";
+    send(client_fd, nil, strlen(nil), 0);
+    break;
+}
+
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
