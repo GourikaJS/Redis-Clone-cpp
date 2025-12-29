@@ -519,11 +519,18 @@ if (block_ms < 0) {
 }
 
 // ---------- BLOCK timeout ----------
-if (elapsed >= block_ms) {
-    const char* nil = "$-1\r\n";
-    send(client_fd, nil, strlen(nil), 0);
+// ---------- No data ----------
+auto elapsed =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time
+    ).count();
+
+if (block_ms < 0 || elapsed >= block_ms) {
+    const char* empty = "*0\r\n";
+    send(client_fd, empty, strlen(empty), 0);
     break;
 }
+
 
 
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
