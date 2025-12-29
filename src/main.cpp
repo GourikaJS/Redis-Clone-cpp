@@ -409,9 +409,9 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
 
 // --------- XREAD -----------
-bool waited = false;
 
 else if (command == "XREAD" && tokens.size() >= 4) {
+    bool waited = false;
 
     int idx = 1;
     long long block_ms = -1;
