@@ -443,6 +443,9 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 
     auto start_time = std::chrono::steady_clock::now();
 
+
+bool slept_once = false;
+long long elapsed = 0;
     while (true) {
 
         // ---------- Collect results ----------
@@ -505,35 +508,21 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             break;
         }
 
+
         // ---------- No data ----------
-        auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start_time
-            ).count();
-
-        // ---------- Non-blocking ----------
-if (block_ms < 0) {
-    const char* empty = "*0\r\n";
-    send(client_fd, empty, strlen(empty), 0);
-    break;
-}
-
-// ---------- BLOCK timeout ----------
-// ---------- No data ----------
 elapsed =
     std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time
     ).count();
 
-if (block_ms < 0 || elapsed >= block_ms) {
+if (slept_once && (block_ms < 0 || elapsed >= block_ms)) {
     const char* empty = "*0\r\n";
     send(client_fd, empty, strlen(empty), 0);
     break;
 }
-
-
-
+      
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        slept_once = true;
     }
 }
 
