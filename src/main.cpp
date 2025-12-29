@@ -520,7 +520,7 @@ if (block_ms < 0) {
 
 // ---------- BLOCK timeout ----------
 // ---------- No data ----------
-auto elapsed =
+elapsed =
     std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time
     ).count();
