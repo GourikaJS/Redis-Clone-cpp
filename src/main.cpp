@@ -522,22 +522,29 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             send(client_fd, empty, strlen(empty), 0);
             break;
         }
-
-        // ---------- Timeout ----------
-        auto elapsed =
+// ---------- Timeout ----------
+auto elapsed =
     std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - start_time
     ).count();
 
 if (elapsed >= block_ms) {
-    const char* empty = "*0\r\n";
-    send(client_fd, empty, strlen(empty), 0);
+    if (block_ms > 0 && waited) {
+        // BLOCK > 0 and we actually waited
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+    } else {
+        // Non-blocking, BLOCK 0, or no wait yet
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+    }
     break;
 }
 
-        // ---------- Sleep briefly ----------
-      waited = true;
+// ---------- Sleep ----------
+waited = true;
 std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
     }
 }
 
