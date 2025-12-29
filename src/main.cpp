@@ -409,6 +409,8 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
 
 // --------- XREAD -----------
+bool waited = false;
+
 else if (command == "XREAD" && tokens.size() >= 4) {
 
     int idx = 1;
@@ -523,18 +525,27 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 
         // ---------- Timeout ----------
         auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - start_time
-            ).count();
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start_time
+    ).count();
 
-        if (elapsed >= block_ms) {
-    const char* nil = "$-1\r\n";
-    send(client_fd, nil, strlen(nil), 0);
+if (elapsed >= block_ms) {
+    if (waited) {
+        // We actually waited → return NULL
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+    } else {
+        // No waiting occurred → return empty array
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+    }
     break;
 }
 
+
         // ---------- Sleep briefly ----------
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+      waited = true;
+std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 }
 
