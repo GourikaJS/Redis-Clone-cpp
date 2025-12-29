@@ -530,18 +530,10 @@ else if (command == "XREAD" && tokens.size() >= 4) {
     ).count();
 
 if (elapsed >= block_ms) {
-    if (block_ms > 0 && waited) {
-        // We actually waited → return NULL
-        const char* nil = "$-1\r\n";
-        send(client_fd, nil, strlen(nil), 0);
-    } else {
-        // No waiting occurred → return empty array
-        const char* empty = "*0\r\n";
-        send(client_fd, empty, strlen(empty), 0);
-    }
+    const char* empty = "*0\r\n";
+    send(client_fd, empty, strlen(empty), 0);
     break;
 }
-
 
         // ---------- Sleep briefly ----------
       waited = true;
