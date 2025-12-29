@@ -530,7 +530,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
     ).count();
 
 if (elapsed >= block_ms) {
-    if (waited) {
+    if (block_ms > 0 && waited) {
         // We actually waited → return NULL
         const char* nil = "$-1\r\n";
         send(client_fd, nil, strlen(nil), 0);
