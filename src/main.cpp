@@ -790,6 +790,13 @@ void send_replica_handshake() {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return;
 
+    // ⏱️ Set connect timeout (1 second)
+    struct timeval timeout;
+    timeout.tv_sec = 1;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(master_port);
@@ -803,9 +810,9 @@ void send_replica_handshake() {
     const char* ping = "*1\r\n$4\r\nPING\r\n";
     send(sock, ping, strlen(ping), 0);
 
-    // Ignore response
     close(sock);
 }
+
 
 
 
