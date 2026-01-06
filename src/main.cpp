@@ -15,7 +15,7 @@
 #include <chrono>
 #include <climits>
 
-
+std::atomic<uint64_t> stream_version{0};
 
 struct Value {
     std::string data;
@@ -331,6 +331,8 @@ else if (command == "XADD" && tokens.size() >= 5) {
     // ---------- Insert ----------
     stream.push_back(entry);
 
+stream_version.fetch_add(1);  // Notify waiting XREAD clients
+
     // ---------- Return ID ----------
     std::string response =
         "$" + std::to_string(entry_id.size()) + "\r\n" +
@@ -410,11 +412,13 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
 // --------- XREAD -----------
 else if (command == "XREAD" && tokens.size() >= 4) {
-
     int idx = 1;
+    long long block_timeout = -1;
+    bool is_blocking = false;
 
-    // Skip optional BLOCK arguments if present
     if (tokens[idx] == "BLOCK" || tokens[idx] == "block") {
+        is_blocking = true;
+        block_timeout = std::stoll(tokens[idx + 1]);
         idx += 2;
     }
 
@@ -436,62 +440,101 @@ else if (command == "XREAD" && tokens.size() >= 4) {
     for (int i = 0; i < n; i++) keys.push_back(tokens[idx + i]);
     for (int i = 0; i < n; i++) ids.push_back(tokens[idx + n + i]);
 
-    std::vector<std::pair<std::string, std::vector<StreamEntry>>> results;
+    auto get_results = [&]() {
+        std::vector<std::pair<std::string, std::vector<StreamEntry>>> results;
+        
+        for (int i = 0; i < n; i++) {
+            auto it = streams.find(keys[i]);
+            if (it == streams.end()) continue;
 
-    for (int i = 0; i < n; i++) {
-        auto it = streams.find(keys[i]);
-        if (it == streams.end()) continue;
+            long long last_ms = 0, last_seq = 0;
+            size_t dash = ids[i].find('-');
+            if (dash != std::string::npos) {
+                last_ms  = std::stoll(ids[i].substr(0, dash));
+                last_seq = std::stoll(ids[i].substr(dash + 1));
+            }
 
-        long long last_ms = 0, last_seq = 0;
-        size_t dash = ids[i].find('-');
-        if (dash != std::string::npos) {
-            last_ms  = std::stoll(ids[i].substr(0, dash));
-            last_seq = std::stoll(ids[i].substr(dash + 1));
-        }
+            std::vector<StreamEntry> entries;
+            for (auto &e : it->second) {
+                if (e.ms > last_ms || (e.ms == last_ms && e.seq > last_seq)) {
+                    entries.push_back(e);
+                }
+            }
 
-        std::vector<StreamEntry> entries;
-        for (auto &e : it->second) {
-            if (e.ms > last_ms || (e.ms == last_ms && e.seq > last_seq)) {
-                entries.push_back(e);
+            if (!entries.empty()) {
+                results.push_back({keys[i], entries});
             }
         }
+        return results;
+    };
 
-        if (!entries.empty()) {
-            results.push_back({keys[i], entries});
+    auto results = get_results();
+
+    // If blocking and no results, wait
+    if (is_blocking && results.empty()) {
+        auto start_time = std::chrono::steady_clock::now();
+        uint64_t initial_version = stream_version.load();
+        
+        while (results.empty()) {
+            // Check timeout
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start_time
+            ).count();
+            
+            if (block_timeout > 0 && elapsed >= block_timeout) {
+                // Timeout expired, return null array
+                const char* null_resp = "$-1\r\n";
+                send(client_fd, null_resp, strlen(null_resp), 0);
+                goto xread_done;  // Exit the command handler
+            }
+
+            // Check if stream was modified
+            if (stream_version.load() != initial_version) {
+                results = get_results();
+                if (!results.empty()) {
+                    break;  // Found new data!
+                }
+                initial_version = stream_version.load();
+            }
+
+            // Sleep briefly to avoid busy-waiting
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
 
-    if (results.empty()) {
+    // Send results
+    if (!results.empty()) {
+        std::string response;
+        response += "*" + std::to_string(results.size()) + "\r\n";
+
+        for (auto &r : results) {
+            response += "*2\r\n";
+            response += "$" + std::to_string(r.first.size()) + "\r\n";
+            response += r.first + "\r\n";
+
+            response += "*" + std::to_string(r.second.size()) + "\r\n";
+            for (auto &e : r.second) {
+                response += "*2\r\n";
+                response += "$" + std::to_string(e.id.size()) + "\r\n";
+                response += e.id + "\r\n";
+
+                response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+                for (auto &kv : e.fields) {
+                    response += "$" + std::to_string(kv.first.size()) + "\r\n";
+                    response += kv.first + "\r\n";
+                    response += "$" + std::to_string(kv.second.size()) + "\r\n";
+                    response += kv.second + "\r\n";
+                }
+            }
+        }
+
+        send(client_fd, response.c_str(), response.size(), 0);
+    } else if (!is_blocking) {
         const char* empty = "*0\r\n";
         send(client_fd, empty, strlen(empty), 0);
-        continue;
     }
-
-    std::string response;
-    response += "*" + std::to_string(results.size()) + "\r\n";
-
-    for (auto &r : results) {
-        response += "*2\r\n";
-        response += "$" + std::to_string(r.first.size()) + "\r\n";
-        response += r.first + "\r\n";
-
-        response += "*" + std::to_string(r.second.size()) + "\r\n";
-        for (auto &e : r.second) {
-            response += "*2\r\n";
-            response += "$" + std::to_string(e.id.size()) + "\r\n";
-            response += e.id + "\r\n";
-
-            response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-            for (auto &kv : e.fields) {
-                response += "$" + std::to_string(kv.first.size()) + "\r\n";
-                response += kv.first + "\r\n";
-                response += "$" + std::to_string(kv.second.size()) + "\r\n";
-                response += kv.second + "\r\n";
-            }
-        }
-    }
-
-    send(client_fd, response.c_str(), response.size(), 0);
+    
+    xread_done:;  // Label for early exit
 }
 
 
