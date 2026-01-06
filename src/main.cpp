@@ -17,7 +17,7 @@
 #include <map> 
 
 std::atomic<uint64_t> stream_version{0};
-
+bool is_replica = false;
 struct Value {
     std::string data;
     std::chrono::steady_clock::time_point expiry;
@@ -29,7 +29,7 @@ std::mutex store_mutex;
 
 std::map<int, bool> in_transaction;  // Track which clients are in transaction
 std::map<int, std::vector<std::vector<std::string>>> queued_commands;  // Store queued commands per client
-bool is_replica = false;
+
 
 
 std::vector<std::string> parse_resp(const std::string& input) {
@@ -777,18 +777,16 @@ else if (command == "INFO" && tokens.size() == 2) {
 
   int main(int argc, char **argv) {
    int port = 6379;
-   is_replica = false;
+    is_replica = false;
 
-for (int i = 1; i < argc; i++) {
+// Bullet-proof replica detection
+for (int i = 0; i < argc; i++) {
     std::string arg = argv[i];
-
+    if (arg.find("replicaof") != std::string::npos) {
+        is_replica = true;
+    }
     if (arg == "--port" && i + 1 < argc) {
         port = std::stoi(argv[i + 1]);
-        i++;
-    }
-    else if (arg == "--replicaof" && i + 2 < argc) {
-        is_replica = true;
-        i += 2;  // skip host and port
     }
 }
 
