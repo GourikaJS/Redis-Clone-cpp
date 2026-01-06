@@ -780,10 +780,33 @@ else if (command == "INFO" && tokens.size() == 2) {
     }
 }
 
+// In handle_client() function, add these with your other command handlers:
+
+// ---------- REPLCONF ----------
+else if (command == "REPLCONF") {
+    const char* ok = "+OK\r\n";
+    send(client_fd, ok, strlen(ok), 0);
+}
+
+// ---------- PSYNC ----------
+else if (command == "PSYNC") {
+    std::string response = "+FULLRESYNC " + master_replid + " " + 
+                          std::to_string(master_repl_offset) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    
+    const char* empty_rdb = "$88\r\n"
+        "REDIS0011\xfa\x09redis-ver\x05" "7.2.0\xfa\x0aredis-bits\xc0@\xfa\x05"
+        "ctime\xc2m\x08\xbce\xfa\x08used-mem\xc2\xb0\xc4\x10\x00\xfa\x08"
+        "aof-base\xc0\x00\xff\xf0n;\xfe\xc0\xffZ\xa2";
+    send(client_fd, empty_rdb, 88 + 4, 0);
+}
+
 
 
     }
     close(client_fd);
+
+    
 }
 
 void send_replica_handshake(int replica_port) {
