@@ -18,6 +18,10 @@
 
 std::atomic<uint64_t> stream_version{0};
 bool is_replica = false;
+
+std::string master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
+long long master_repl_offset = 0;
+
 struct Value {
     std::string data;
     std::chrono::steady_clock::time_point expiry;
@@ -749,18 +753,24 @@ else if (command == "INFO" && tokens.size() == 2) {
 
     if (section == "replication") {
 
-        std::string role = is_replica ? "slave" : "master";
+    std::string body = "# Replication\r\n";
 
-        std::string body =
-            "# Replication\r\n"
-            "role:" + role + "\r\n";
-
-        std::string response =
-            "$" + std::to_string(body.size()) + "\r\n" +
-            body + "\r\n";
-
-        send(client_fd, response.c_str(), response.size(), 0);
+    if (is_replica) {
+        body += "role:slave\r\n";
     } else {
+        body += "role:master\r\n";
+        body += "master_replid:" + master_replid + "\r\n";
+        body += "master_repl_offset:" + std::to_string(master_repl_offset) + "\r\n";
+    }
+
+    std::string response =
+        "$" + std::to_string(body.size()) + "\r\n" +
+        body + "\r\n";
+
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
+    else {
         const char* empty = "$0\r\n\r\n";
         send(client_fd, empty, strlen(empty), 0);
     }
