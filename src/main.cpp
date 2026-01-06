@@ -22,6 +22,10 @@ bool is_replica = false;
 std::string master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
 long long master_repl_offset = 0;
 
+std::string master_host;
+int master_port = 0;
+
+
 struct Value {
     std::string data;
     std::chrono::steady_clock::time_point expiry;
@@ -782,23 +786,48 @@ else if (command == "INFO" && tokens.size() == 2) {
     close(client_fd);
 }
 
+void send_replica_handshake() {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) return;
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(master_port);
+    inet_pton(AF_INET, master_host.c_str(), &addr.sin_addr);
+
+    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        close(sock);
+        return;
+    }
+
+    const char* ping = "*1\r\n$4\r\nPING\r\n";
+    send(sock, ping, strlen(ping), 0);
+
+    // Ignore response
+    close(sock);
+}
 
 
 
   int main(int argc, char **argv) {
    int port = 6379;
-    is_replica = false;
+is_replica = false;
 
-// Bullet-proof replica detection
-for (int i = 0; i < argc; i++) {
+for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
-    if (arg.find("replicaof") != std::string::npos) {
-        is_replica = true;
-    }
+
     if (arg == "--port" && i + 1 < argc) {
         port = std::stoi(argv[i + 1]);
+        i++;
+    }
+    else if (arg == "--replicaof" && i + 2 < argc) {
+        is_replica = true;
+        master_host = argv[i + 1];
+        master_port = std::stoi(argv[i + 2]);
+        i += 2;
     }
 }
+
 
 
    std::cout << std::unitbuf;
@@ -828,6 +857,11 @@ server_addr.sin_port = htons(port);
 
     // 4. Listen
     listen(server_fd, 5);
+
+    if (is_replica) {
+    send_replica_handshake();
+}
+
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
