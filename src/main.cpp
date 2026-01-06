@@ -786,7 +786,7 @@ else if (command == "INFO" && tokens.size() == 2) {
     close(client_fd);
 }
 
-void send_replica_handshake() {
+void send_replica_handshake(int replica_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         std::cerr << "Failed to create socket for replication\n";
@@ -813,26 +813,22 @@ void send_replica_handshake() {
     
     bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
-        std::cerr << "Failed to receive PING response\n";
         close(sock);
         return;
     }
-    buffer[bytes_read] = '\0';
-    // Expected: +PONG\r\n
 
-    // Step 2: Send REPLCONF listening-port
-std::string port_str = std::to_string(port);
-std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + std::to_string(port_str.size()) + "\r\n" + port_str + "\r\n";    
-send(sock, replconf1.c_str(), replconf1.size(), 0);
+    // Step 2: Send REPLCONF listening-port (using the passed port)
+    std::string port_str = std::to_string(replica_port);
+    std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + 
+                            std::to_string(port_str.size()) + "\r\n" + 
+                            port_str + "\r\n";
+    send(sock, replconf1.c_str(), replconf1.size(), 0);
     
     bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
-        std::cerr << "Failed to receive REPLCONF response\n";
         close(sock);
         return;
     }
-    buffer[bytes_read] = '\0';
-    // Expected: +OK\r\n
 
     // Step 3: Send REPLCONF capa psync2
     const char* replconf2 = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
@@ -840,12 +836,9 @@ send(sock, replconf1.c_str(), replconf1.size(), 0);
     
     bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
-        std::cerr << "Failed to receive REPLCONF capa response\n";
         close(sock);
         return;
     }
-    buffer[bytes_read] = '\0';
-    // Expected: +OK\r\n
 
     // Step 4: Send PSYNC
     const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
@@ -853,27 +846,18 @@ send(sock, replconf1.c_str(), replconf1.size(), 0);
     
     bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
     if (bytes_read <= 0) {
-        std::cerr << "Failed to receive PSYNC response\n";
         close(sock);
         return;
     }
-    buffer[bytes_read] = '\0';
-    // Expected: +FULLRESYNC <replid> <offset>\r\n
-    // Followed by RDB file
 
-    std::cout << "Handshake completed successfully\n";
-    
-    // Keep connection open for replication
-    // In a real implementation, you'd keep reading commands from master
+    // Keep connection open
     while (true) {
         bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
         if (bytes_read <= 0) break;
-        // Process replication commands here
     }
 
     close(sock);
 }
-
 
 
 
@@ -926,9 +910,9 @@ server_addr.sin_port = htons(port);
     // 4. Listen
     listen(server_fd, 5);
 
-  if (is_replica) {
+ if (is_replica) {
     std::thread([port]() {
-        send_replica_handshake_with_port(port);
+        send_replica_handshake(port);
     }).detach();
 }
 
