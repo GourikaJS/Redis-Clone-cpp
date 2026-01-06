@@ -817,7 +817,7 @@ void send_replica_handshake(int replica_port) {
         return;
     }
 
-    // Step 2: Send REPLCONF listening-port (using the passed port)
+    // Step 2: Send REPLCONF listening-port
     std::string port_str = std::to_string(replica_port);
     std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + 
                             std::to_string(port_str.size()) + "\r\n" + 
@@ -850,12 +850,7 @@ void send_replica_handshake(int replica_port) {
         return;
     }
 
-    // Keep connection open
-    while (true) {
-        bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_read <= 0) break;
-    }
-
+    // Handshake complete - just close for now
     close(sock);
 }
 
