@@ -776,20 +776,21 @@ else if (command == "INFO" && tokens.size() == 2) {
 
 
   int main(int argc, char **argv) {
-    int port = 6379; // default Redis port
+   int port = 6379;
+
 for (int i = 1; i < argc; i++) {
-    if (std::string(argv[i]) == "--port" && i + 1 < argc) {
+    std::string arg = argv[i];
+
+    if (arg == "--port" && i + 1 < argc) {
         port = std::stoi(argv[i + 1]);
+        i++;
+    }
+    else if (arg == "--replicaof" && i + 2 < argc) {
+        is_replica = true;
+        i += 2;  // skip host and port
     }
 }
 
-for (int i = 1; i < argc; i++) {
-    if (std::string(argv[i]) == "--replicaof" && i + 2 < argc) {
-        is_replica = true;
-        // argv[i+1] = master host
-        // argv[i+2] = master port
-    }
-}
 
    std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
