@@ -777,6 +777,7 @@ else if (command == "INFO" && tokens.size() == 2) {
 
   int main(int argc, char **argv) {
    int port = 6379;
+   is_replica = false;
 
 for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
