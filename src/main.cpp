@@ -105,6 +105,79 @@ bool has_new_entries(
     return false;
 }
 
+std::string execute_command_and_capture(
+    const std::vector<std::string>& tokens,
+    int client_fd
+) {
+    std::string command = tokens[0];
+    for (char &c : command) c = toupper(c);
+
+    // ---------- SET ----------
+    if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
+        std::lock_guard<std::mutex> lock(store_mutex);
+
+        Value val;
+        val.data = tokens[2];
+        val.has_expiry = false;
+
+        if (tokens.size() == 5) {
+            std::string option = tokens[3];
+            for (char &c : option) c = toupper(c);
+
+            if (option == "PX") {
+                int ttl_ms = std::stoi(tokens[4]);
+                val.expiry = std::chrono::steady_clock::now()
+                           + std::chrono::milliseconds(ttl_ms);
+                val.has_expiry = true;
+            }
+        }
+
+        store[tokens[1]] = val;
+        return "+OK\r\n";
+    }
+
+    // ---------- GET ----------
+    if (command == "GET" && tokens.size() == 2) {
+        std::lock_guard<std::mutex> lock(store_mutex);
+
+        auto it = store.find(tokens[1]);
+        if (it == store.end()) return "$-1\r\n";
+
+        Value& val = it->second;
+        if (val.has_expiry &&
+            std::chrono::steady_clock::now() > val.expiry) {
+            store.erase(it);
+            return "$-1\r\n";
+        }
+
+        return "$" + std::to_string(val.data.size()) + "\r\n"
+             + val.data + "\r\n";
+    }
+
+    // ---------- INCR ----------
+    if (command == "INCR" && tokens.size() == 2) {
+        std::lock_guard<std::mutex> lock(store_mutex);
+
+        auto& val = store[tokens[1]];
+        if (val.data.empty()) {
+            val.data = "1";
+            val.has_expiry = false;
+            return ":1\r\n";
+        }
+
+        try {
+            long long num = std::stoll(val.data);
+            num++;
+            val.data = std::to_string(num);
+            return ":" + std::to_string(num) + "\r\n";
+        } catch (...) {
+            return "-ERR value is not an integer or out of range\r\n";
+        }
+    }
+
+    return "-ERR unknown command\r\n";
+}
+
 
 void handle_client(int client_fd) {
     char buffer[1024];
@@ -632,79 +705,28 @@ else if (command == "MULTI") {
 }
 
 else if (command == "EXEC") {
-    std::lock_guard<std::mutex> lock(store_mutex);
-    
     if (!in_transaction[client_fd]) {
-        // Not in a transaction
         const char* err = "-ERR EXEC without MULTI\r\n";
         send(client_fd, err, strlen(err), 0);
-    } else {
-        // Execute all queued commands
-        std::vector<std::string> results;
-        
-        for (auto& cmd_tokens : queued_commands[client_fd]) {
-            // Execute each command and capture result
-            std::string cmd = cmd_tokens[0];
-            for (char &c : cmd) c = toupper(c);
-            
-            // You'll need to capture the output instead of sending directly
-            // For now, let's create a simple result string
-            std::string result;
-            
-            // Execute the command (simplified - you'll need to handle each command type)
-            if (cmd == "SET") {
-                // Execute SET and capture result
-                result = "+OK\r\n";
-            }
-            else if (cmd == "GET") {
-                // Execute GET and capture result
-                auto it = store.find(cmd_tokens[1]);
-                if (it == store.end() || (it->second.has_expiry && std::chrono::steady_clock::now() > it->second.expiry)) {
-                    result = "$-1\r\n";
-                } else {
-                    result = "$" + std::to_string(it->second.data.size()) + "\r\n" + it->second.data + "\r\n";
-                }
-            }
-            else if (cmd == "INCR") {
-                // Execute INCR and capture result
-                std::string key = cmd_tokens[1];
-                auto it = store.find(key);
-                
-                if (it == store.end() || (it->second.has_expiry && std::chrono::steady_clock::now() > it->second.expiry)) {
-                    Value val;
-                    val.data = "1";
-                    val.has_expiry = false;
-                    store[key] = val;
-                    result = ":1\r\n";
-                } else {
-                    try {
-                        long long num = std::stoll(it->second.data);
-                        num++;
-                        it->second.data = std::to_string(num);
-                        result = ":" + std::to_string(num) + "\r\n";
-                    } catch (...) {
-                        result = "-ERR value is not an integer or out of range\r\n";
-                    }
-                }
-            }
-            // Add other commands as needed
-            
-            results.push_back(result);
-        }
-        
-        // Send array of results
-        std::string response = "*" + std::to_string(results.size()) + "\r\n";
-        for (const auto& r : results) {
-            response += r;
-        }
-        
-        send(client_fd, response.c_str(), response.size(), 0);
-        
-        // Clear transaction state
-        in_transaction[client_fd] = false;
-        queued_commands[client_fd].clear();
+        continue;
     }
+
+    in_transaction[client_fd] = false;
+
+    auto& queue = queued_commands[client_fd];
+
+    std::string response =
+        "*" + std::to_string(queue.size()) + "\r\n";
+
+    for (auto& cmd_tokens : queue) {
+        response += execute_command_and_capture(cmd_tokens, client_fd);
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+
+    queue.clear();
 }
+
 
 
 
