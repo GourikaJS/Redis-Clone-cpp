@@ -29,6 +29,7 @@ std::mutex store_mutex;
 
 std::map<int, bool> in_transaction;  // Track which clients are in transaction
 std::map<int, std::vector<std::vector<std::string>>> queued_commands;  // Store queued commands per client
+bool is_replica = false;
 
 
 std::vector<std::string> parse_resp(const std::string& input) {
@@ -749,7 +750,11 @@ else if (command == "INFO" && tokens.size() == 2) {
     if (section == "replication") {
         std::string body =
             "# Replication\r\n"
-            "role:master\r\n";
+std::string role = is_replica ? "slave" : "master";
+
+std::string body =
+    "# Replication\r\n"
+    "role:" + role + "\r\n";
 
         std::string response =
             "$" + std::to_string(body.size()) + "\r\n" +
@@ -778,6 +783,15 @@ for (int i = 1; i < argc; i++) {
         port = std::stoi(argv[i + 1]);
     }
 }
+
+for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--replicaof" && i + 2 < argc) {
+        is_replica = true;
+        // argv[i+1] = master host
+        // argv[i+2] = master port
+    }
+}
+
    std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
