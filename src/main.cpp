@@ -813,11 +813,12 @@ void send_replica_handshake(int replica_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) return;
 
-    // Set 2 second timeout on receive
+    // Set timeout
     struct timeval timeout;
-    timeout.tv_sec = 2;
+    timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -829,54 +830,12 @@ void send_replica_handshake(int replica_port) {
         return;
     }
 
-    char buffer[1024];
-
-    // PING
+    // Just send PING for stage 1
     const char* ping = "*1\r\n$4\r\nPING\r\n";
-    if (send(sock, ping, strlen(ping), 0) <= 0) {
-        close(sock);
-        return;
-    }
-    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
-        close(sock);
-        return;
-    }
-
-    // REPLCONF listening-port
-    std::string port_str = std::to_string(replica_port);
-    std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + 
-                            std::to_string(port_str.size()) + "\r\n" + 
-                            port_str + "\r\n";
-    if (send(sock, replconf1.c_str(), replconf1.size(), 0) <= 0) {
-        close(sock);
-        return;
-    }
-    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
-        close(sock);
-        return;
-    }
-
-    // REPLCONF capa psync2
-    const char* replconf2 = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
-    if (send(sock, replconf2, strlen(replconf2), 0) <= 0) {
-        close(sock);
-        return;
-    }
-    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
-        close(sock);
-        return;
-    }
-
-    // PSYNC
-    const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-    if (send(sock, psync, strlen(psync), 0) <= 0) {
-        close(sock);
-        return;
-    }
-    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
-        close(sock);
-        return;
-    }
+    send(sock, ping, strlen(ping), 0);
+    
+    char buffer[1024];
+    recv(sock, buffer, sizeof(buffer), 0);
 
     close(sock);
 }
@@ -933,6 +892,8 @@ server_addr.sin_port = htons(port);
     listen(server_fd, 5);
 
  if (is_replica) {
+    std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
+    
     std::thread([port]() {
         send_replica_handshake(port);
     }).detach();
