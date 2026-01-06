@@ -164,12 +164,12 @@ void handle_client(int client_fd) {
 
 
         // ---------- GET ----------
-        else if (command == "GET" && tokens.size() == 2) {
+       else if (command == "GET" && tokens.size() == 2) {
     std::lock_guard<std::mutex> lock(store_mutex);
 
     auto it = store.find(tokens[1]);
     if (it == store.end()) {
-        const char* nil = "*0\r\n";
+        const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
         send(client_fd, nil, strlen(nil), 0);
         continue;
     }
@@ -179,7 +179,7 @@ void handle_client(int client_fd) {
     if (val.has_expiry &&
         std::chrono::steady_clock::now() > val.expiry) {
         store.erase(it);
-        const char* nil = "*0\r\n";
+        const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
         send(client_fd, nil, strlen(nil), 0);
         continue;
     }
