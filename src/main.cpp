@@ -14,6 +14,7 @@
 #include <vector>
 #include <chrono>
 #include <climits>
+#include <map> 
 
 std::atomic<uint64_t> stream_version{0};
 
