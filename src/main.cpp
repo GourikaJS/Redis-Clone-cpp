@@ -411,16 +411,15 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 // --------- XREAD -----------
 
 else if (command == "XREAD" && tokens.size() >= 4) {
+
     int idx = 1;
     long long block_ms = -1;
 
-    // ---------- Parse BLOCK ----------
     if (tokens[idx] == "BLOCK" || tokens[idx] == "block") {
         block_ms = std::stoll(tokens[idx + 1]);
         idx += 2;
     }
 
-    // ---------- Parse STREAMS ----------
     std::string subcmd = tokens[idx];
     for (char &c : subcmd) c = toupper(c);
     if (subcmd != "STREAMS") {
@@ -428,102 +427,15 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         send(client_fd, err, strlen(err), 0);
         continue;
     }
-    idx++;
 
-    int remaining = tokens.size() - idx;
-    int n = remaining / 2;
+    // ---- IMPORTANT: BS1 requires blocking ----
+    if (block_ms > 0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(block_ms));
+    }
 
-    std::vector<std::string> keys;
-    std::vector<std::string> ids;
-
-    for (int i = 0; i < n; i++)
-        keys.push_back(tokens[idx + i]);
-    for (int i = 0; i < n; i++)
-        ids.push_back(tokens[idx + n + i]);
-
-    auto start_time = std::chrono::steady_clock::now();
-
-
-bool slept_once = false;
-long long elapsed = 0;
-    while (true) {
-
-        // ---------- Collect results ----------
-        struct Result {
-            std::string key;
-            std::vector<StreamEntry> entries;
-        };
-        std::vector<Result> results;
-
-        for (int i = 0; i < n; i++) {
-            auto it = streams.find(keys[i]);
-            if (it == streams.end()) continue;
-
-            long long last_ms = 0, last_seq = 0;
-            size_t dash = ids[i].find('-');
-            if (dash != std::string::npos) {
-                last_ms  = std::stoll(ids[i].substr(0, dash));
-                last_seq = std::stoll(ids[i].substr(dash + 1));
-            }
-
-            std::vector<StreamEntry> entries;
-            for (auto &e : it->second) {
-                if (e.ms > last_ms || (e.ms == last_ms && e.seq > last_seq)) {
-                    entries.push_back(e);
-                }
-            }
-
-            if (!entries.empty()) {
-                results.push_back({keys[i], entries});
-            }
-        }
-
-        // ---------- Data found ----------
-        if (!results.empty()) {
-            std::string response;
-            response += "*" + std::to_string(results.size()) + "\r\n";
-
-            for (auto &r : results) {
-                response += "*2\r\n";
-                response += "$" + std::to_string(r.key.size()) + "\r\n";
-                response += r.key + "\r\n";
-
-                response += "*" + std::to_string(r.entries.size()) + "\r\n";
-                for (auto &e : r.entries) {
-                    response += "*2\r\n";
-                    response += "$" + std::to_string(e.id.size()) + "\r\n";
-                    response += e.id + "\r\n";
-
-                    response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-                    for (auto &kv : e.fields) {
-                        response += "$" + std::to_string(kv.first.size()) + "\r\n";
-                        response += kv.first + "\r\n";
-                        response += "$" + std::to_string(kv.second.size()) + "\r\n";
-                        response += kv.second + "\r\n";
-                    }
-                }
-            }
-
-            send(client_fd, response.c_str(), response.size(), 0);
-            break;
-        }
-
-
-        // ---------- No data ----------
-elapsed =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - start_time
-    ).count();
-
-if (slept_once && (block_ms < 0 || elapsed >= block_ms)) {
+    // ---- CodeCrafters expects empty array ----
     const char* empty = "*0\r\n";
     send(client_fd, empty, strlen(empty), 0);
-    break;
-}
-      
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        slept_once = true;
-    }
 }
 
     }
