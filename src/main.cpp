@@ -748,13 +748,12 @@ else if (command == "INFO" && tokens.size() == 2) {
     for (char &c : section) c = tolower(c);
 
     if (section == "replication") {
+
+        std::string role = is_replica ? "slave" : "master";
+
         std::string body =
             "# Replication\r\n"
-std::string role = is_replica ? "slave" : "master";
-
-std::string body =
-    "# Replication\r\n"
-    "role:" + role + "\r\n";
+            "role:" + role + "\r\n";
 
         std::string response =
             "$" + std::to_string(body.size()) + "\r\n" +
