@@ -788,10 +788,13 @@ else if (command == "INFO" && tokens.size() == 2) {
 
 void send_replica_handshake(int replica_port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) {
-        std::cerr << "Failed to create socket for replication\n";
-        return;
-    }
+    if (sock < 0) return;
+
+    // Set 2 second timeout on receive
+    struct timeval timeout;
+    timeout.tv_sec = 2;
+    timeout.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
@@ -799,58 +802,59 @@ void send_replica_handshake(int replica_port) {
     inet_pton(AF_INET, master_host.c_str(), &addr.sin_addr);
 
     if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
-        std::cerr << "Failed to connect to master\n";
         close(sock);
         return;
     }
 
     char buffer[1024];
-    int bytes_read;
 
-    // Step 1: Send PING
+    // PING
     const char* ping = "*1\r\n$4\r\nPING\r\n";
-    send(sock, ping, strlen(ping), 0);
-    
-    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
+    if (send(sock, ping, strlen(ping), 0) <= 0) {
+        close(sock);
+        return;
+    }
+    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
         close(sock);
         return;
     }
 
-    // Step 2: Send REPLCONF listening-port
+    // REPLCONF listening-port
     std::string port_str = std::to_string(replica_port);
     std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + 
                             std::to_string(port_str.size()) + "\r\n" + 
                             port_str + "\r\n";
-    send(sock, replconf1.c_str(), replconf1.size(), 0);
-    
-    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
+    if (send(sock, replconf1.c_str(), replconf1.size(), 0) <= 0) {
+        close(sock);
+        return;
+    }
+    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
         close(sock);
         return;
     }
 
-    // Step 3: Send REPLCONF capa psync2
+    // REPLCONF capa psync2
     const char* replconf2 = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
-    send(sock, replconf2, strlen(replconf2), 0);
-    
-    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
+    if (send(sock, replconf2, strlen(replconf2), 0) <= 0) {
+        close(sock);
+        return;
+    }
+    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
         close(sock);
         return;
     }
 
-    // Step 4: Send PSYNC
+    // PSYNC
     const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-    send(sock, psync, strlen(psync), 0);
-    
-    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
+    if (send(sock, psync, strlen(psync), 0) <= 0) {
+        close(sock);
+        return;
+    }
+    if (recv(sock, buffer, sizeof(buffer), 0) <= 0) {
         close(sock);
         return;
     }
 
-    // Handshake complete - just close for now
     close(sock);
 }
 
