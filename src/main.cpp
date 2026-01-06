@@ -482,11 +482,11 @@ else if (command == "XREAD" && tokens.size() >= 4) {
             ).count();
             
             if (block_timeout > 0 && elapsed >= block_timeout) {
-                // Timeout expired, return null array
-                const char* null_resp = "$-1\r\n";
-                send(client_fd, null_resp, strlen(null_resp), 0);
-                goto xread_done;  // Exit the command handler
-            }
+    // Timeout expired, return null array
+    const char* null_resp = "*-1\r\n";  // ✅ CORRECT - null array
+    send(client_fd, null_resp, strlen(null_resp), 0);
+    goto xread_done;
+}
 
             // Check if stream was modified
             if (stream_version.load() != initial_version) {
