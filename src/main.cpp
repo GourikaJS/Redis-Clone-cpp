@@ -440,6 +440,22 @@ else if (command == "XREAD" && tokens.size() >= 4) {
     for (int i = 0; i < n; i++) keys.push_back(tokens[idx + i]);
     for (int i = 0; i < n; i++) ids.push_back(tokens[idx + n + i]);
 
+    // ========== HANDLE $ ID ==========
+    // Replace $ with the last ID in each stream
+    for (int i = 0; i < n; i++) {
+        if (ids[i] == "$") {
+            auto it = streams.find(keys[i]);
+            if (it != streams.end() && !it->second.empty()) {
+                // Use the last entry's ID
+                ids[i] = it->second.back().id;
+            } else {
+                // Stream doesn't exist or is empty, use 0-0
+                ids[i] = "0-0";
+            }
+        }
+    }
+    // =================================
+
     auto get_results = [&]() {
         std::vector<std::pair<std::string, std::vector<StreamEntry>>> results;
         
@@ -476,28 +492,24 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         uint64_t initial_version = stream_version.load();
         
         while (results.empty()) {
-            // Check timeout
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - start_time
             ).count();
             
             if (block_timeout > 0 && elapsed >= block_timeout) {
-    // Timeout expired, return null array
-    const char* null_resp = "*-1\r\n";  // ✅ CORRECT - null array
-    send(client_fd, null_resp, strlen(null_resp), 0);
-    goto xread_done;
-}
+                const char* null_resp = "*-1\r\n";
+                send(client_fd, null_resp, strlen(null_resp), 0);
+                goto xread_done;
+            }
 
-            // Check if stream was modified
             if (stream_version.load() != initial_version) {
                 results = get_results();
                 if (!results.empty()) {
-                    break;  // Found new data!
+                    break;
                 }
                 initial_version = stream_version.load();
             }
 
-            // Sleep briefly to avoid busy-waiting
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
     }
@@ -534,10 +546,8 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         send(client_fd, empty, strlen(empty), 0);
     }
     
-    xread_done:;  // Label for early exit
+    xread_done:;
 }
-
-
 
     }
     close(client_fd);
