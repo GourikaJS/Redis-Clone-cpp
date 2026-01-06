@@ -858,9 +858,10 @@ server_addr.sin_port = htons(port);
     // 4. Listen
     listen(server_fd, 5);
 
-    if (is_replica) {
-    send_replica_handshake();
+   if (is_replica) {
+    std::thread(send_replica_handshake).detach();
 }
+
 
 
     struct sockaddr_in client_addr;
