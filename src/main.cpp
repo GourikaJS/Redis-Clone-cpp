@@ -631,6 +631,81 @@ else if (command == "MULTI") {
     }
 }
 
+else if (command == "EXEC") {
+    std::lock_guard<std::mutex> lock(store_mutex);
+    
+    if (!in_transaction[client_fd]) {
+        // Not in a transaction
+        const char* err = "-ERR EXEC without MULTI\r\n";
+        send(client_fd, err, strlen(err), 0);
+    } else {
+        // Execute all queued commands
+        std::vector<std::string> results;
+        
+        for (auto& cmd_tokens : queued_commands[client_fd]) {
+            // Execute each command and capture result
+            std::string cmd = cmd_tokens[0];
+            for (char &c : cmd) c = toupper(c);
+            
+            // You'll need to capture the output instead of sending directly
+            // For now, let's create a simple result string
+            std::string result;
+            
+            // Execute the command (simplified - you'll need to handle each command type)
+            if (cmd == "SET") {
+                // Execute SET and capture result
+                result = "+OK\r\n";
+            }
+            else if (cmd == "GET") {
+                // Execute GET and capture result
+                auto it = store.find(cmd_tokens[1]);
+                if (it == store.end() || (it->second.has_expiry && std::chrono::steady_clock::now() > it->second.expiry)) {
+                    result = "$-1\r\n";
+                } else {
+                    result = "$" + std::to_string(it->second.data.size()) + "\r\n" + it->second.data + "\r\n";
+                }
+            }
+            else if (cmd == "INCR") {
+                // Execute INCR and capture result
+                std::string key = cmd_tokens[1];
+                auto it = store.find(key);
+                
+                if (it == store.end() || (it->second.has_expiry && std::chrono::steady_clock::now() > it->second.expiry)) {
+                    Value val;
+                    val.data = "1";
+                    val.has_expiry = false;
+                    store[key] = val;
+                    result = ":1\r\n";
+                } else {
+                    try {
+                        long long num = std::stoll(it->second.data);
+                        num++;
+                        it->second.data = std::to_string(num);
+                        result = ":" + std::to_string(num) + "\r\n";
+                    } catch (...) {
+                        result = "-ERR value is not an integer or out of range\r\n";
+                    }
+                }
+            }
+            // Add other commands as needed
+            
+            results.push_back(result);
+        }
+        
+        // Send array of results
+        std::string response = "*" + std::to_string(results.size()) + "\r\n";
+        for (const auto& r : results) {
+            response += r;
+        }
+        
+        send(client_fd, response.c_str(), response.size(), 0);
+        
+        // Clear transaction state
+        in_transaction[client_fd] = false;
+        queued_commands[client_fd].clear();
+    }
+}
+
 
 
     }
