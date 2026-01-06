@@ -409,14 +409,12 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
 
 // --------- XREAD -----------
-
 else if (command == "XREAD" && tokens.size() >= 4) {
 
     int idx = 1;
-    long long block_ms = -1;
 
+    // Skip optional BLOCK arguments if present
     if (tokens[idx] == "BLOCK" || tokens[idx] == "block") {
-        block_ms = std::stoll(tokens[idx + 1]);
         idx += 2;
     }
 
@@ -438,8 +436,6 @@ else if (command == "XREAD" && tokens.size() >= 4) {
     for (int i = 0; i < n; i++) keys.push_back(tokens[idx + i]);
     for (int i = 0; i < n; i++) ids.push_back(tokens[idx + n + i]);
 
-    // ---------- STEP 1: CHECK FOR DATA ----------
-    std::string response;
     std::vector<std::pair<std::string, std::vector<StreamEntry>>> results;
 
     for (int i = 0; i < n; i++) {
@@ -449,7 +445,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         long long last_ms = 0, last_seq = 0;
         size_t dash = ids[i].find('-');
         if (dash != std::string::npos) {
-            last_ms = std::stoll(ids[i].substr(0, dash));
+            last_ms  = std::stoll(ids[i].substr(0, dash));
             last_seq = std::stoll(ids[i].substr(dash + 1));
         }
 
@@ -465,43 +461,40 @@ else if (command == "XREAD" && tokens.size() >= 4) {
         }
     }
 
-    // ---------- DATA FOUND → RETURN IMMEDIATELY ----------
-    if (!results.empty()) {
-        response += "*" + std::to_string(results.size()) + "\r\n";
-
-        for (auto &r : results) {
-            response += "*2\r\n";
-            response += "$" + std::to_string(r.first.size()) + "\r\n";
-            response += r.first + "\r\n";
-
-            response += "*" + std::to_string(r.second.size()) + "\r\n";
-            for (auto &e : r.second) {
-                response += "*2\r\n";
-                response += "$" + std::to_string(e.id.size()) + "\r\n";
-                response += e.id + "\r\n";
-
-                response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
-                for (auto &kv : e.fields) {
-                    response += "$" + std::to_string(kv.first.size()) + "\r\n";
-                    response += kv.first + "\r\n";
-                    response += "$" + std::to_string(kv.second.size()) + "\r\n";
-                    response += kv.second + "\r\n";
-                }
-            }
-        }
-
-        send(client_fd, response.c_str(), response.size(), 0);
+    if (results.empty()) {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
         continue;
     }
 
-    // ---------- NO DATA ----------
-    if (block_ms > 0) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(block_ms));
+    std::string response;
+    response += "*" + std::to_string(results.size()) + "\r\n";
+
+    for (auto &r : results) {
+        response += "*2\r\n";
+        response += "$" + std::to_string(r.first.size()) + "\r\n";
+        response += r.first + "\r\n";
+
+        response += "*" + std::to_string(r.second.size()) + "\r\n";
+        for (auto &e : r.second) {
+            response += "*2\r\n";
+            response += "$" + std::to_string(e.id.size()) + "\r\n";
+            response += e.id + "\r\n";
+
+            response += "*" + std::to_string(e.fields.size() * 2) + "\r\n";
+            for (auto &kv : e.fields) {
+                response += "$" + std::to_string(kv.first.size()) + "\r\n";
+                response += kv.first + "\r\n";
+                response += "$" + std::to_string(kv.second.size()) + "\r\n";
+                response += kv.second + "\r\n";
+            }
+        }
     }
 
-    const char* empty = "*0\r\n";
-    send(client_fd, empty, strlen(empty), 0);
+    send(client_fd, response.c_str(), response.size(), 0);
 }
+
+
 
     }
     close(client_fd);
