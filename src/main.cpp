@@ -747,6 +747,13 @@ else if (command == "DISCARD") {
     close(client_fd);
 }
 
+int port = 6379; // default Redis port
+for (int i = 1; i < argc; i++) {
+    if (std::string(argv[i]) == "--port" && i + 1 < argc) {
+        port = std::stoi(argv[i + 1]);
+    }
+}
+
 
   int main(int argc, char **argv) {
    std::cout << std::unitbuf;
@@ -767,7 +774,7 @@ else if (command == "DISCARD") {
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(6379);
+server_addr.sin_port = htons(port);
 
     if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
         std::cerr << "Failed to bind\n";
