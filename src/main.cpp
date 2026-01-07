@@ -127,42 +127,48 @@ std::string execute_command_and_capture(
     std::string command = tokens[0];
     for (char &c : command) c = toupper(c);
 
-    // ---------- SET ----------
-    if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
-        std::lock_guard<std::mutex> lock(store_mutex);
+ // ---------- SET ----------
+if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
+    std::lock_guard<std::mutex> lock(store_mutex);
 
-        Value val;
-        val.data = tokens[2];
-        val.has_expiry = false;
+    Value val;
+    val.data = tokens[2];
+    val.has_expiry = false;
 
-        if (tokens.size() == 5) {
-            std::string option = tokens[3];
-            for (char &c : option) c = toupper(c);
+    if (tokens.size() == 5) {
+        std::string option = tokens[3];
+        for (char &c : option) c = toupper(c);
 
-            if (option == "PX") {
-                int ttl_ms = std::stoi(tokens[4]);
-                val.expiry = std::chrono::steady_clock::now()
-                           + std::chrono::milliseconds(ttl_ms);
-                val.has_expiry = true;
-            }
+        if (option == "PX") {
+            int ttl_ms = std::stoi(tokens[4]);
+            val.expiry = std::chrono::steady_clock::now()
+                       + std::chrono::milliseconds(ttl_ms);
+            val.has_expiry = true;
         }
+    }
 
-        store[tokens[1]] = val;
-        return "+OK\r\n";
+    store[tokens[1]] = val;
 
-       if (!is_replica && replica_fd != -1) {
-    std::string resp =
-        "*3\r\n$3\r\nSET\r\n$" +
-        std::to_string(tokens[1].size()) + "\r\n" +
-        tokens[1] + "\r\n$" +
-        std::to_string(tokens[2].size()) + "\r\n" +
-        tokens[2] + "\r\n";
+    // ✅ Send OK to client
+    const char* ok = "+OK\r\n";
+    send(client_fd, ok, strlen(ok), 0);
 
-    send(replica_fd, resp.c_str(), resp.size(), 0);
+    // ✅ Propagate to replica (MASTER ONLY)
+    int rfd = replica_fd.load();
+    if (!is_replica && rfd != -1) {
+        std::string resp =
+            "*3\r\n$3\r\nSET\r\n$" +
+            std::to_string(tokens[1].size()) + "\r\n" +
+            tokens[1] + "\r\n$" +
+            std::to_string(tokens[2].size()) + "\r\n" +
+            tokens[2] + "\r\n";
+
+        send(rfd, resp.c_str(), resp.size(), 0);
+    }
+
+    continue;
 }
 
-
-    }
 
     // ---------- GET ----------
     if (command == "GET" && tokens.size() == 2) {
