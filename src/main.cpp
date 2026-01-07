@@ -857,27 +857,33 @@ void send_replica_handshake(int replica_port) {
 
 
   int main(int argc, char **argv) {
-   int port = 6379;
-is_replica = false;
+    int port = 6379;
+    is_replica = false;
 
-for (int i = 1; i < argc; i++) {
-    std::string arg = argv[i];
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
 
-    if (arg == "--port" && i + 1 < argc) {
-        port = std::stoi(argv[i + 1]);
-        i++;
+        if (arg == "--port" && i + 1 < argc) {
+            port = std::stoi(argv[i + 1]);
+            i++;
+        }
+        else if (arg == "--replicaof" && i + 1 < argc) {
+            is_replica = true;
+            
+            // Parse "host port" from single argument
+            std::string master_info = argv[i + 1];
+            size_t space_pos = master_info.find(' ');
+            
+            if (space_pos != std::string::npos) {
+                master_host = master_info.substr(0, space_pos);
+                master_port = std::stoi(master_info.substr(space_pos + 1));
+            }
+            
+            i++;
+        }
     }
-    else if (arg == "--replicaof" && i + 2 < argc) {
-        is_replica = true;
-        master_host = argv[i + 1];
-        master_port = std::stoi(argv[i + 2]);
-        i += 2;
-    }
-}
 
-
-
-   std::cout << std::unitbuf;
+    std::cout << std::unitbuf;
     std::cerr << std::unitbuf;
 
     // 1. Create server socket
@@ -895,7 +901,7 @@ for (int i = 1; i < argc; i++) {
     struct sockaddr_in server_addr;
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = INADDR_ANY;
-server_addr.sin_port = htons(port);
+    server_addr.sin_port = htons(port);
 
     if (bind(server_fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) != 0) {
         std::cerr << "Failed to bind\n";
@@ -905,11 +911,11 @@ server_addr.sin_port = htons(port);
     // 4. Listen
     listen(server_fd, 5);
 
-if (is_replica) {
-    std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
-    send_replica_handshake(port);
-    std::cerr << "Handshake function returned\n";
-}
+    if (is_replica) {
+        std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
+        send_replica_handshake(port);
+        std::cerr << "Handshake function returned\n";
+    }
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
@@ -925,8 +931,5 @@ if (is_replica) {
         t.detach();
     }
 
-    return 0; // never reached
+    return 0;
 }
-
-
- 
