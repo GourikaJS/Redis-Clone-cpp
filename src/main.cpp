@@ -25,7 +25,7 @@ std::unordered_set<int> replica_connections;
 
 std::atomic<uint64_t> stream_version{0};
 bool is_replica = false;
-// int replica_fd = -1;
+int replica_fd = -1;
 
 
 std::string master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
@@ -731,9 +731,11 @@ else if (
     std::string resp = execute_command_and_capture(tokens, client_fd);
 
     // 🔑 Replica must NOT reply to master
-    if (!is_replica) {
-        send(client_fd, resp.c_str(), resp.size(), 0);
-    }
+   // Do not reply ONLY to the replication connection
+if (!(is_replica && client_fd == master_fd)) {
+    send(client_fd, resp.c_str(), resp.size(), 0);
+}
+
 }
 
 
@@ -915,6 +917,8 @@ void send_replica_handshake(int replica_port) {
         close(sock);
         return;
     }
+
+    master_fd = sock;
 
     freeaddrinfo(result);
     std::cerr << "Connected!\n";
