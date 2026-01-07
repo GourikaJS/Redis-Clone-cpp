@@ -15,6 +15,10 @@
 #include <chrono>
 #include <climits>
 #include <map> 
+#include <unordered_set>
+
+std::unordered_set<int> replica_connections;
+
 
 std::atomic<uint64_t> stream_version{0};
 bool is_replica = false;
@@ -829,14 +833,18 @@ else if (command == "PSYNC") {
     send(client_fd, rdb_header.c_str(), rdb_header.size(), 0);
     send(client_fd, empty_rdb, rdb_len, 0);
 
-    replica_fd = client_fd;
-    continue;
+   replica_fd = client_fd;
+replica_connections.insert(client_fd);
+continue;
 
 
 }
 
     }
+   if (replica_connections.count(client_fd) == 0) {
     close(client_fd);
+}
+
 
     
 }
