@@ -146,7 +146,7 @@ std::string execute_command_and_capture(
         store[tokens[1]] = val;
         return "+OK\r\n";
 
-        if (replica_fd != -1) {
+       if (!is_replica && replica_fd != -1) {
     std::string resp =
         "*3\r\n$3\r\nSET\r\n$" +
         std::to_string(tokens[1].size()) + "\r\n" +
@@ -156,6 +156,7 @@ std::string execute_command_and_capture(
 
     send(replica_fd, resp.c_str(), resp.size(), 0);
 }
+
 
     }
 
@@ -829,7 +830,9 @@ else if (command == "PSYNC") {
     send(client_fd, empty_rdb, rdb_len, 0);
 
     replica_fd = client_fd;
-    
+    continue;
+
+
 }
 
     }
