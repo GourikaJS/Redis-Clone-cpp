@@ -149,14 +149,8 @@ if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
 
     store[tokens[1]] = val;
 
-    // ✅ Send OK to client
-    const char* ok = "+OK\r\n";
-    send(client_fd, ok, strlen(ok), 0);
-
-    // ✅ Propagate to replica (MASTER ONLY)
-   int rfd = replica_fd;
-
-    if (!is_replica && rfd != -1) {
+    // 🔁 Propagate to replica (MASTER ONLY)
+    if (!is_replica && replica_fd != -1) {
         std::string resp =
             "*3\r\n$3\r\nSET\r\n$" +
             std::to_string(tokens[1].size()) + "\r\n" +
@@ -164,11 +158,13 @@ if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
             std::to_string(tokens[2].size()) + "\r\n" +
             tokens[2] + "\r\n";
 
-        send(rfd, resp.c_str(), resp.size(), 0);
+        send(replica_fd, resp.c_str(), resp.size(), 0);
     }
 
-    
+    // ✅ ONLY return response (do NOT send here)
+    return "+OK\r\n";
 }
+
 
 
     // ---------- GET ----------
