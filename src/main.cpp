@@ -167,7 +167,7 @@ if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
         send(rfd, resp.c_str(), resp.size(), 0);
     }
 
-    continue;
+    
 }
 
 
