@@ -237,13 +237,19 @@ void handle_client(int client_fd) {
         for (auto& c : command) c = toupper(c);
 
         // After parsing the command, check if we're in a transaction
-if (in_transaction[client_fd] && command != "EXEC" && command != "DISCARD" && command != "MULTI") {
-    // Queue the command instead of executing
+// Transaction queuing (CLIENTS ONLY, not replication)
+if (client_fd != master_fd &&
+    in_transaction[client_fd] &&
+    command != "EXEC" &&
+    command != "DISCARD" &&
+    command != "MULTI") {
+
     queued_commands[client_fd].push_back(tokens);
     const char* response = "+QUEUED\r\n";
     send(client_fd, response, strlen(response), 0);
-    continue;  // Skip normal command execution
+    continue;
 }
+
 
 // Now your normal command handling continues...
 
