@@ -729,8 +729,13 @@ else if (
     command == "INCR"
 ) {
     std::string resp = execute_command_and_capture(tokens, client_fd);
-    send(client_fd, resp.c_str(), resp.size(), 0);
+
+    // 🔑 Replica must NOT reply to master
+    if (!is_replica) {
+        send(client_fd, resp.c_str(), resp.size(), 0);
+    }
 }
+
 
 
 // ---------- MULTI ----------
