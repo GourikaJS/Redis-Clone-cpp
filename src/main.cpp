@@ -827,9 +827,10 @@ else if (command == "PSYNC") {
     std::string rdb_header = "$" + std::to_string(rdb_len) + "\r\n";
     send(client_fd, rdb_header.c_str(), rdb_header.size(), 0);
     send(client_fd, empty_rdb, rdb_len, 0);
+
+    replica_fd = client_fd;
+    
 }
-
-
 
     }
     close(client_fd);
