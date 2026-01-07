@@ -848,17 +848,33 @@ void send_replica_handshake(int replica_port) {
     }
 
     freeaddrinfo(result);
-    std::cerr << "Connected! Sending PING\n";
+    std::cerr << "Connected!\n";
 
+    char buffer[1024];
+
+    // Step 1: PING
+    std::cerr << "Sending PING\n";
     const char* ping = "*1\r\n$4\r\nPING\r\n";
     send(sock, ping, strlen(ping), 0);
-    
-    char buffer[1024];
-    int n = recv(sock, buffer, sizeof(buffer), 0);
-    std::cerr << "Received " << n << " bytes\n";
+    recv(sock, buffer, sizeof(buffer), 0);
 
-    close(sock);
+    // Step 2: REPLCONF listening-port
+    std::cerr << "Sending REPLCONF listening-port\n";
+    std::string replica_port_str = std::to_string(replica_port);
+    std::string replconf1 = "*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$" + 
+                            std::to_string(replica_port_str.size()) + "\r\n" + 
+                            replica_port_str + "\r\n";
+    send(sock, replconf1.c_str(), replconf1.size(), 0);
+    recv(sock, buffer, sizeof(buffer), 0);
+
+    // Step 3: REPLCONF capa psync2
+    std::cerr << "Sending REPLCONF capa psync2\n";
+    const char* replconf2 = "*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n";
+    send(sock, replconf2, strlen(replconf2), 0);
+    recv(sock, buffer, sizeof(buffer), 0);
+
     std::cerr << "Handshake complete\n";
+    close(sock);
 }
 
 
