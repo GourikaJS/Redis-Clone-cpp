@@ -17,6 +17,9 @@
 #include <map> 
 #include <unordered_set>
 
+std::vector<int> replica_fds;
+std::mutex replica_mutex;
+
 std::unordered_set<int> replica_connections;
 
 
@@ -941,7 +944,8 @@ void send_replica_handshake(int replica_port) {
     recv(sock, buffer, sizeof(buffer), 0);
 
     std::cerr << "Handshake complete\n";
- replica_fd = sock;   // keep connection open for propagation
+  // keep connection open for propagation
+//    replica_fd = sock; 
 
 }
 
