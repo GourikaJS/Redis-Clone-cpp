@@ -873,6 +873,12 @@ void send_replica_handshake(int replica_port) {
     send(sock, replconf2, strlen(replconf2), 0);
     recv(sock, buffer, sizeof(buffer), 0);
 
+    // Step 4: PSYNC
+    std::cerr << "Sending PSYNC ? -1\n";
+    const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+    send(sock, psync, strlen(psync), 0);
+    recv(sock, buffer, sizeof(buffer), 0);
+
     std::cerr << "Handshake complete\n";
     close(sock);
 }
