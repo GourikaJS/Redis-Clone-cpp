@@ -18,6 +18,8 @@
 
 std::atomic<uint64_t> stream_version{0};
 bool is_replica = false;
+int replica_fd = -1;
+
 
 std::string master_replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb";
 long long master_repl_offset = 0;
@@ -143,6 +145,18 @@ std::string execute_command_and_capture(
 
         store[tokens[1]] = val;
         return "+OK\r\n";
+
+        if (replica_fd != -1) {
+    std::string resp =
+        "*3\r\n$3\r\nSET\r\n$" +
+        std::to_string(tokens[1].size()) + "\r\n" +
+        tokens[1] + "\r\n$" +
+        std::to_string(tokens[2].size()) + "\r\n" +
+        tokens[2] + "\r\n";
+
+    send(replica_fd, resp.c_str(), resp.size(), 0);
+}
+
     }
 
     // ---------- GET ----------
@@ -894,7 +908,8 @@ void send_replica_handshake(int replica_port) {
     recv(sock, buffer, sizeof(buffer), 0);
 
     std::cerr << "Handshake complete\n";
-    close(sock);
+ replica_fd = sock;   // keep connection open for propagation
+
 }
 
 
