@@ -823,24 +823,31 @@ void send_replica_handshake(int replica_port) {
     timeout.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(master_port);
+    // Use getaddrinfo to resolve hostname
+    struct addrinfo hints{}, *result;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+
+    std::string port_str = std::to_string(master_port);
     
-    std::cerr << "Attempting to connect to " << master_host << ":" << master_port << "\n";
+    std::cerr << "Resolving " << master_host << ":" << master_port << "\n";
     
-    if (inet_pton(AF_INET, master_host.c_str(), &addr.sin_addr) <= 0) {
-        std::cerr << "Invalid address\n";
+    if (getaddrinfo(master_host.c_str(), port_str.c_str(), &hints, &result) != 0) {
+        std::cerr << "Failed to resolve hostname\n";
         close(sock);
         return;
     }
 
-    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
+    std::cerr << "Connecting...\n";
+    
+    if (connect(sock, result->ai_addr, result->ai_addrlen) != 0) {
         std::cerr << "Connection failed\n";
+        freeaddrinfo(result);
         close(sock);
         return;
     }
 
+    freeaddrinfo(result);
     std::cerr << "Connected! Sending PING\n";
 
     const char* ping = "*1\r\n$4\r\nPING\r\n";
