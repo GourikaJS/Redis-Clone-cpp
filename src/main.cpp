@@ -154,7 +154,8 @@ if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
     send(client_fd, ok, strlen(ok), 0);
 
     // ✅ Propagate to replica (MASTER ONLY)
-    int rfd = replica_fd.load();
+   int rfd = replica_fd;
+
     if (!is_replica && rfd != -1) {
         std::string resp =
             "*3\r\n$3\r\nSET\r\n$" +
@@ -259,59 +260,59 @@ if (in_transaction[client_fd] && command != "EXEC" && command != "DISCARD" && co
         }
 
         // ---------- SET ----------
-        else if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
-    std::lock_guard<std::mutex> lock(store_mutex);
+//         else if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
+//     std::lock_guard<std::mutex> lock(store_mutex);
 
-    Value val;
-    val.data = tokens[2];
-    val.has_expiry = false;
+//     Value val;
+//     val.data = tokens[2];
+//     val.has_expiry = false;
 
-    if (tokens.size() == 5) {
-        std::string option = tokens[3];
-        for (auto& c : option) c = toupper(c);
+//     if (tokens.size() == 5) {
+//         std::string option = tokens[3];
+//         for (auto& c : option) c = toupper(c);
 
-        if (option == "PX") {
-            int ttl_ms = std::stoi(tokens[4]);
-            val.expiry = std::chrono::steady_clock::now()
-                       + std::chrono::milliseconds(ttl_ms);
-            val.has_expiry = true;
-        }
-    }
+//         if (option == "PX") {
+//             int ttl_ms = std::stoi(tokens[4]);
+//             val.expiry = std::chrono::steady_clock::now()
+//                        + std::chrono::milliseconds(ttl_ms);
+//             val.has_expiry = true;
+//         }
+//     }
 
-    store[tokens[1]] = val;
+//     store[tokens[1]] = val;
 
-    const char* ok = "+OK\r\n";
-    send(client_fd, ok, strlen(ok), 0);
-}
+//     const char* ok = "+OK\r\n";
+//     send(client_fd, ok, strlen(ok), 0);
+// }
 
 
         // ---------- GET ----------
-       else if (command == "GET" && tokens.size() == 2) {
-    std::lock_guard<std::mutex> lock(store_mutex);
+//        else if (command == "GET" && tokens.size() == 2) {
+//     std::lock_guard<std::mutex> lock(store_mutex);
 
-    auto it = store.find(tokens[1]);
-    if (it == store.end()) {
-        const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
-        send(client_fd, nil, strlen(nil), 0);
-        continue;
-    }
+//     auto it = store.find(tokens[1]);
+//     if (it == store.end()) {
+//         const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
+//         send(client_fd, nil, strlen(nil), 0);
+//         continue;
+//     }
 
-    Value& val = it->second;
+//     Value& val = it->second;
 
-    if (val.has_expiry &&
-        std::chrono::steady_clock::now() > val.expiry) {
-        store.erase(it);
-        const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
-        send(client_fd, nil, strlen(nil), 0);
-        continue;
-    }
+//     if (val.has_expiry &&
+//         std::chrono::steady_clock::now() > val.expiry) {
+//         store.erase(it);
+//         const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
+//         send(client_fd, nil, strlen(nil), 0);
+//         continue;
+//     }
 
-    std::string response =
-        "$" + std::to_string(val.data.size()) + "\r\n" +
-        val.data + "\r\n";
+//     std::string response =
+//         "$" + std::to_string(val.data.size()) + "\r\n" +
+//         val.data + "\r\n";
 
-    send(client_fd, response.c_str(), response.size(), 0);
-}
+//     send(client_fd, response.c_str(), response.size(), 0);
+// }
 
 // -------- TYPE COMMAND LOGIC --------------
 
@@ -672,7 +673,7 @@ else if (command == "XREAD" && tokens.size() >= 4) {
 }
 
 // ----------  INCR ----------
-else if (command == "INCR" && tokens.size() == 2) {
+ /* else if (command == "INCR" && tokens.size() == 2) {
     std::lock_guard<std::mutex> lock(store_mutex);
     std::string key = tokens[1];
     
@@ -718,7 +719,17 @@ else if (command == "INCR" && tokens.size() == 2) {
             }
         }
     }
+} */
+
+else if (
+    command == "SET" ||
+    command == "GET" ||
+    command == "INCR"
+) {
+    std::string resp = execute_command_and_capture(tokens, client_fd);
+    send(client_fd, resp.c_str(), resp.size(), 0);
 }
+
 
 // ---------- MULTI ----------
 else if (command == "MULTI") {
