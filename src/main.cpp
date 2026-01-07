@@ -810,34 +810,48 @@ else if (command == "PSYNC") {
 }
 
 void send_replica_handshake(int replica_port) {
+    std::cerr << "send_replica_handshake called\n";
+    
     int sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) return;
+    if (sock < 0) {
+        std::cerr << "Socket creation failed\n";
+        return;
+    }
 
-    // Set timeout
     struct timeval timeout;
     timeout.tv_sec = 1;
     timeout.tv_usec = 0;
     setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(master_port);
-    inet_pton(AF_INET, master_host.c_str(), &addr.sin_addr);
-
-    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
+    
+    std::cerr << "Attempting to connect to " << master_host << ":" << master_port << "\n";
+    
+    if (inet_pton(AF_INET, master_host.c_str(), &addr.sin_addr) <= 0) {
+        std::cerr << "Invalid address\n";
         close(sock);
         return;
     }
 
-    // Just send PING for stage 1
+    if (connect(sock, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        std::cerr << "Connection failed\n";
+        close(sock);
+        return;
+    }
+
+    std::cerr << "Connected! Sending PING\n";
+
     const char* ping = "*1\r\n$4\r\nPING\r\n";
     send(sock, ping, strlen(ping), 0);
     
     char buffer[1024];
-    recv(sock, buffer, sizeof(buffer), 0);
+    int n = recv(sock, buffer, sizeof(buffer), 0);
+    std::cerr << "Received " << n << " bytes\n";
 
     close(sock);
+    std::cerr << "Handshake complete\n";
 }
 
 
@@ -891,15 +905,11 @@ server_addr.sin_port = htons(port);
     // 4. Listen
     listen(server_fd, 5);
 
- if (is_replica) {
+if (is_replica) {
     std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
-    
-    std::thread([port]() {
-        send_replica_handshake(port);
-    }).detach();
+    send_replica_handshake(port);
+    std::cerr << "Handshake function returned\n";
 }
-
-
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
