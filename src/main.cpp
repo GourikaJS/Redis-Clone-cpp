@@ -730,15 +730,15 @@ else if (
     command == "GET" ||
     command == "INCR"
 ) {
+    // ALWAYS execute the command
     std::string resp = execute_command_and_capture(tokens, client_fd);
 
-    // 🔑 Replica must NOT reply to master
-   // Do not reply ONLY to the replication connection
-if (!(is_replica && client_fd == master_fd)) {
-    send(client_fd, resp.c_str(), resp.size(), 0);
+    // Replica must NOT reply only to the master
+    if (!(is_replica && client_fd == master_fd)) {
+        send(client_fd, resp.c_str(), resp.size(), 0);
+    }
 }
 
-}
 
 
 
