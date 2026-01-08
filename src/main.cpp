@@ -236,6 +236,11 @@ void handle_client(int client_fd) {
         // Normalize command to uppercase
         for (auto& c : command) c = toupper(c);
 
+        if (is_replica && client_fd == master_fd) {
+        execute_command_and_capture(tokens, client_fd);
+        continue;
+    }
+
         // After parsing the command, check if we're in a transaction
 // Transaction queuing (CLIENTS ONLY, not replication)
 if (client_fd != master_fd &&
