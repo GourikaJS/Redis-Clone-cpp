@@ -929,6 +929,7 @@ void send_replica_handshake(int replica_port) {
 
     char buffer[4096];
     std::string accumulated;
+    int bytes_read;
 
     // Step 1: PING
     std::cerr << "Sending PING\n";
