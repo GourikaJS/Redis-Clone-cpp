@@ -848,21 +848,27 @@ else if (command == "INFO" && tokens.size() == 2) {
 
 // ---------- REPLCONF ----------
 // When handling a replica connection that sends REPLCONF ACK
-if (command == "REPLCONF" && tokens.size() >= 3) {
+// ---------- REPLCONF ----------
+else if (command == "REPLCONF") {
     std::string subcmd = tokens[1];
     for (char &c : subcmd) c = toupper(c);
-    
-    if (subcmd == "ACK") {
-        // Store the ACK offset
+
+    // REPLCONF ACK <offset>
+    if (subcmd == "ACK" && tokens.size() >= 3) {
         long long offset = std::stoll(tokens[2]);
         {
             std::lock_guard<std::mutex> lock(ack_mutex);
             replica_acks[client_fd] = offset;
         }
-        // Don't send a response to ACK
-        continue;
+        continue; // no reply for ACK
     }
+
+    // REPLCONF listening-port / capa → reply OK
+    const char* ok = "+OK\r\n";
+    send(client_fd, ok, strlen(ok), 0);
+    continue;
 }
+
 // ---------- PSYNC ----------
 // ---------- PSYNC ----------
 else if (command == "PSYNC") {
