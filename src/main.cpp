@@ -885,6 +885,20 @@ continue;
 
 }
 
+// ---------- WAIT ----------
+else if (command == "WAIT" && tokens.size() == 3) {
+    // WAIT <numreplicas> <timeout>
+    // int numreplicas = std::stoi(tokens[1]);
+    // int timeout = std::stoi(tokens[2]);
+    
+    // For now, just return 0 (no replicas)
+    std::lock_guard<std::mutex> lock(replica_mutex);
+    int replica_count = replica_fds.size();
+    
+    std::string response = ":" + std::to_string(replica_count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
