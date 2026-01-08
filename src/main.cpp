@@ -236,10 +236,7 @@ void handle_client(int client_fd) {
         // Normalize command to uppercase
         for (auto& c : command) c = toupper(c);
 
-        if (is_replica && client_fd == master_fd) {
-        execute_command_and_capture(tokens, client_fd);
-        continue;
-    }
+        
 
         // After parsing the command, check if we're in a transaction
 // Transaction queuing (CLIENTS ONLY, not replication)
@@ -902,11 +899,6 @@ void send_replica_handshake(int replica_port) {
         return;
     }
 
-    struct timeval timeout;
-    timeout.tv_sec = 1;
-    timeout.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
     // Use getaddrinfo to resolve hostname
     struct addrinfo hints{}, *result;
     hints.ai_family = AF_INET;
@@ -932,11 +924,11 @@ void send_replica_handshake(int replica_port) {
     }
 
     master_fd = sock;
-
     freeaddrinfo(result);
     std::cerr << "Connected!\n";
 
-    char buffer[1024];
+    char buffer[4096];
+    std::string accumulated;
 
     // Step 1: PING
     std::cerr << "Sending PING\n";
@@ -963,12 +955,79 @@ void send_replica_handshake(int replica_port) {
     std::cerr << "Sending PSYNC ? -1\n";
     const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
     send(sock, psync, strlen(psync), 0);
-    recv(sock, buffer, sizeof(buffer), 0);
+    
+    // Read FULLRESYNC response and RDB file
+    int bytes_read = recv(sock, buffer, sizeof(buffer), 0);
+    if (bytes_read <= 0) {
+        std::cerr << "Failed to receive PSYNC response\n";
+        close(sock);
+        return;
+    }
+    
+    std::cerr << "Handshake complete, now listening for commands from master\n";
 
-    std::cerr << "Handshake complete\n";
-  // keep connection open for propagation
-//    replica_fd = sock; 
+    // Keep reading commands from master
+    while (true) {
+        bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_read <= 0) {
+            std::cerr << "Master connection closed\n";
+            break;
+        }
 
+        buffer[bytes_read] = '\0';
+        accumulated += std::string(buffer, bytes_read);
+
+        // Process complete commands
+        while (true) {
+            if (accumulated.empty() || accumulated[0] != '*') break;
+
+            size_t end_pos = accumulated.find("\r\n");
+            if (end_pos == std::string::npos) break;
+
+            // Get number of elements
+            int num_elements = std::stoi(accumulated.substr(1, end_pos - 1));
+            size_t pos = end_pos + 2;
+
+            // Try to parse complete command
+            std::vector<std::string> tokens;
+            bool complete = true;
+
+            for (int i = 0; i < num_elements; i++) {
+                if (pos >= accumulated.size() || accumulated[pos] != '$') {
+                    complete = false;
+                    break;
+                }
+
+                size_t len_end = accumulated.find("\r\n", pos);
+                if (len_end == std::string::npos) {
+                    complete = false;
+                    break;
+                }
+
+                int len = std::stoi(accumulated.substr(pos + 1, len_end - pos - 1));
+                pos = len_end + 2;
+
+                if (pos + len + 2 > accumulated.size()) {
+                    complete = false;
+                    break;
+                }
+
+                tokens.push_back(accumulated.substr(pos, len));
+                pos += len + 2;
+            }
+
+            if (!complete) break;
+
+            // Process the command
+            std::cerr << "Received command from master: " << tokens[0] << "\n";
+            execute_command_and_capture(tokens, master_fd);
+
+            // Remove processed command from buffer
+            accumulated = accumulated.substr(pos);
+        }
+    }
+
+    close(sock);
 }
 
 
@@ -1029,10 +1088,13 @@ void send_replica_handshake(int replica_port) {
     listen(server_fd, 5);
 
     if (is_replica) {
-        std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
+    std::cerr << "Replica mode: connecting to " << master_host << ":" << master_port << "\n";
+    std::thread handshake_thread([port]() {
         send_replica_handshake(port);
-        std::cerr << "Handshake function returned\n";
-    }
+    });
+    handshake_thread.detach();
+    std::cerr << "Handshake thread started\n";
+}
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
