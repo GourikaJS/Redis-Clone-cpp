@@ -20,6 +20,8 @@
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
 
+std::vector<std::string> rdb_keys;
+
 
 std::vector<int> replica_fds;
 std::mutex replica_mutex;
@@ -231,6 +233,60 @@ std::string execute_command_and_capture(
 
     return "-ERR unknown command\r\n";
 }
+
+
+void load_rdb_file() {
+    std::string path = config_dir + "/" + config_dbfilename;
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        // File doesn't exist → empty DB
+        return;
+    }
+
+    // Read entire file into buffer
+    std::vector<unsigned char> buf(
+        (std::istreambuf_iterator<char>(file)),
+        std::istreambuf_iterator<char>()
+    );
+
+    // Very minimal parsing:
+    // Skip header until we hit a string-encoded key
+    size_t i = 0;
+
+    // Skip "REDISxxxx"
+    if (buf.size() < 9) return;
+    i = 9;
+
+    while (i < buf.size()) {
+        unsigned char opcode = buf[i++];
+
+        // 0xFE = DB selector
+        if (opcode == 0xFE) {
+            i++; // skip db number
+        }
+        // 0xFD / 0xFC = expiry → skip
+        else if (opcode == 0xFD) {
+            i += 4;
+        }
+        else if (opcode == 0xFC) {
+            i += 8;
+        }
+        // 0x00 = string key-value pair
+        else if (opcode == 0x00) {
+            // Read key length
+            unsigned char key_len = buf[i++];
+            std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
+            rdb_keys.push_back(key);
+            break; // only one key needed for this stage
+        }
+        // 0xFF = EOF
+        else if (opcode == 0xFF) {
+            break;
+        }
+    }
+}
+
 
 
 void handle_client(int client_fd) {
@@ -981,6 +1037,7 @@ if (master_repl_offset == 0) {
     send(client_fd, response.c_str(), response.size(), 0);
 }
 
+//    ------ CONFIG GET ------
 else if (command == "CONFIG" && tokens.size() == 3) {
     std::string subcmd = tokens[1];
     for (char &c : subcmd) c = toupper(c);
@@ -1008,6 +1065,23 @@ else if (command == "CONFIG" && tokens.size() == 3) {
         "*2\r\n" +
         std::string("$") + std::to_string(key.size()) + "\r\n" + key + "\r\n" +
         "$" + std::to_string(value.size()) + "\r\n" + value + "\r\n";
+
+    send(client_fd, response.c_str(), response.size(), 0);
+}
+
+
+else if (command == "KEYS" && tokens.size() == 2) {
+    if (tokens[1] != "*") {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+        continue;
+    }
+
+    std::string response = "*" + std::to_string(rdb_keys.size()) + "\r\n";
+    for (auto &key : rdb_keys) {
+        response += "$" + std::to_string(key.size()) + "\r\n";
+        response += key + "\r\n";
+    }
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
@@ -1326,6 +1400,8 @@ while (true) {
         config_dbfilename = argv[++i];
     }
 }
+
+load_rdb_file();
 
 
     std::cout << std::unitbuf;
