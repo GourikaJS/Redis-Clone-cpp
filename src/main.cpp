@@ -989,13 +989,14 @@ if (bytes_read <= 0) {
 std::string response(buffer, bytes_read);
 std::cerr << "PSYNC response received: " << bytes_read << " bytes\n";
 
-// Find FULLRESYNC response end
+// Find FULLRESYNC response end (the \r\n after +FULLRESYNC ...)
 size_t fullresync_end = response.find("\r\n");
 if (fullresync_end != std::string::npos) {
     size_t pos = fullresync_end + 2;
     
-    // Look for RDB file marker ($<length>\r\n)
+    // Check if there's an RDB file following
     if (pos < response.size() && response[pos] == '$') {
+        // Found RDB file marker
         size_t rdb_len_end = response.find("\r\n", pos);
         if (rdb_len_end != std::string::npos) {
             int rdb_len = std::stoi(response.substr(pos + 1, rdb_len_end - pos - 1));
@@ -1025,9 +1026,9 @@ if (fullresync_end != std::string::npos) {
             }
         }
     } else {
-        // No RDB file marker found - might be inline RDB or no RDB
-        // Just continue, any commands will be in the next recv
-        std::cerr << "No RDB file marker found, continuing\n";
+        // No RDB marker immediately after FULLRESYNC
+        // The RDB might come in the next packet, or there might be no RDB
+        std::cerr << "No immediate RDB file marker, waiting for next recv\n";
     }
 }
 
