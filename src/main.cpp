@@ -1035,6 +1035,11 @@ std::cerr << "Handshake complete, now listening for commands from master\n";
 
 // Keep reading commands from master
 while (true) {
+    // At the start of the command processing loop, add:
+std::cerr << "Accumulated buffer size: " << accumulated.size() << " bytes\n";
+if (!accumulated.empty()) {
+    std::cerr << "First char: '" << accumulated[0] << "'\n";
+}
     // Only recv if we don't already have data in accumulated
     if (accumulated.empty() || accumulated[0] != '*') {
         bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
