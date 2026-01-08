@@ -1068,11 +1068,29 @@ while (true) {
         if (!complete) break;
 
         // Process the command
-        std::cerr << "Processing command from master: " << tokens[0] << "\n";
-        execute_command_and_capture(tokens, master_fd);
+std::cerr << "Processing command from master: " << tokens[0] << "\n";
 
-        // Remove processed command from buffer
-        accumulated = accumulated.substr(pos);
+// Check if this is REPLCONF GETACK
+std::string cmd = tokens[0];
+for (char &c : cmd) c = toupper(c);
+
+if (cmd == "REPLCONF" && tokens.size() >= 3) {
+    std::string subcmd = tokens[1];
+    for (char &c : subcmd) c = toupper(c);
+    
+    if (subcmd == "GETACK") {
+        // Respond with REPLCONF ACK 0
+        const char* ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
+        send(master_fd, ack, strlen(ack), 0);
+        std::cerr << "Sent REPLCONF ACK 0 to master\n";
+    }
+} else {
+    // All other commands: execute but don't respond
+    execute_command_and_capture(tokens, master_fd);
+}
+
+// Remove processed command from buffer
+accumulated = accumulated.substr(pos);
     }
 }
 
