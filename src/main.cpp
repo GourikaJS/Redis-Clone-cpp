@@ -242,18 +242,14 @@ void load_rdb_file() {
 
     std::ifstream file(path, std::ios::binary);
     if (!file.is_open()) {
-        // File doesn't exist → empty DB
-        return;
+        return; // file does not exist
     }
 
-    // Read entire file into buffer
     std::vector<unsigned char> buf(
         (std::istreambuf_iterator<char>(file)),
         std::istreambuf_iterator<char>()
     );
 
-    // Very minimal parsing:
-    // Skip header until we hit a string-encoded key
     size_t i = 0;
 
     // Skip "REDISxxxx"
@@ -263,31 +259,42 @@ void load_rdb_file() {
     while (i < buf.size()) {
         unsigned char opcode = buf[i++];
 
-        // 0xFE = DB selector
+        // SELECTDB
         if (opcode == 0xFE) {
-            i++; // skip db number
+            i++; // db number
         }
-        // 0xFD / 0xFC = expiry → skip
+        // EXPIRETIME
         else if (opcode == 0xFD) {
             i += 4;
         }
+        // EXPIRETIME_MS
         else if (opcode == 0xFC) {
             i += 8;
         }
-        // 0x00 = string key-value pair
+        // STRING TYPE
         else if (opcode == 0x00) {
-            // Read key length
-            unsigned char key_len = buf[i++];
+            // ---- decode length-encoded string ----
+            unsigned char len_byte = buf[i++];
+
+            size_t key_len;
+            if ((len_byte & 0xC0) == 0x00) {
+                // 6-bit length
+                key_len = len_byte & 0x3F;
+            } else {
+                return; // other encodings not needed for this stage
+            }
+
             std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
             rdb_keys.push_back(key);
-            break; // only one key needed for this stage
+            break;
         }
-        // 0xFF = EOF
+        // EOF
         else if (opcode == 0xFF) {
             break;
         }
     }
 }
+
 
 
 
