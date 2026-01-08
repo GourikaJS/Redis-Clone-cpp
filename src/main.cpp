@@ -241,9 +241,7 @@ void load_rdb_file() {
     std::string path = config_dir + "/" + config_dbfilename;
 
     std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) {
-        return; // file does not exist
-    }
+    if (!file.is_open()) return;
 
     std::vector<unsigned char> buf(
         (std::istreambuf_iterator<char>(file)),
@@ -252,16 +250,41 @@ void load_rdb_file() {
 
     size_t i = 0;
 
-    // Skip "REDISxxxx"
+    // Skip header: "REDISxxxx"
     if (buf.size() < 9) return;
     i = 9;
+
+    auto read_len = [&](size_t &idx) -> size_t {
+        unsigned char b = buf[idx++];
+
+        // 6-bit length
+        if ((b & 0xC0) == 0x00) {
+            return b & 0x3F;
+        }
+
+        // 14-bit length
+        if ((b & 0xC0) == 0x40) {
+            size_t len = ((b & 0x3F) << 8) | buf[idx++];
+            return len;
+        }
+
+        // Other encodings not needed for this stage
+        return 0;
+    };
 
     while (i < buf.size()) {
         unsigned char opcode = buf[i++];
 
+        // AUX field
+        if (opcode == 0xFA) {
+            size_t klen = read_len(i);
+            i += klen;
+            size_t vlen = read_len(i);
+            i += vlen;
+        }
         // SELECTDB
-        if (opcode == 0xFE) {
-            i++; // db number
+        else if (opcode == 0xFE) {
+            read_len(i); // db number
         }
         // EXPIRETIME
         else if (opcode == 0xFD) {
@@ -271,29 +294,20 @@ void load_rdb_file() {
         else if (opcode == 0xFC) {
             i += 8;
         }
-        // STRING TYPE
+        // STRING key-value pair
         else if (opcode == 0x00) {
-            // ---- decode length-encoded string ----
-            unsigned char len_byte = buf[i++];
-
-            size_t key_len;
-            if ((len_byte & 0xC0) == 0x00) {
-                // 6-bit length
-                key_len = len_byte & 0x3F;
-            } else {
-                return; // other encodings not needed for this stage
-            }
-
+            size_t key_len = read_len(i);
             std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
             rdb_keys.push_back(key);
-            break;
+            return; // only one key needed for JZ6
         }
         // EOF
         else if (opcode == 0xFF) {
-            break;
+            return;
         }
     }
 }
+
 
 
 
