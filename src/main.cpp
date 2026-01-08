@@ -958,7 +958,7 @@ void send_replica_handshake(int replica_port) {
     send(sock, replconf2, strlen(replconf2), 0);
     recv(sock, buffer, sizeof(buffer), 0);
 
-    // Step 4: PSYNC
+// Step 4: PSYNC
 std::cerr << "Sending PSYNC ? -1\n";
 const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
 send(sock, psync, strlen(psync), 0);
@@ -985,9 +985,9 @@ if (rdb_start != std::string::npos) {
         
         std::cerr << "RDB file length: " << rdb_len << " bytes\n";
         
-        // Check if we received all RDB data
+        // Calculate how much RDB data we have
         int received_rdb = bytes_read - rdb_data_start;
-        std::cerr << "Received " << received_rdb << " of " << rdb_len << " RDB bytes\n";
+        std::cerr << "Received " << received_rdb << " of " << rdb_len << " RDB bytes in first read\n";
         
         // Read remaining RDB data if needed
         while (received_rdb < rdb_len) {
@@ -997,74 +997,84 @@ if (rdb_start != std::string::npos) {
         }
         
         std::cerr << "RDB file fully received\n";
+        
+        // IMPORTANT: Add any data after the RDB file to accumulated
+        // This handles commands that arrived in the same packet as the RDB
+        size_t data_after_rdb = rdb_data_start + rdb_len;
+        if (data_after_rdb < response.size()) {
+            accumulated = response.substr(data_after_rdb);
+            std::cerr << "Found " << accumulated.size() << " bytes after RDB\n";
+        }
     }
 }
 
 std::cerr << "Handshake complete, now listening for commands from master\n";
-accumulated.clear(); // Clear any leftover data
 
 // Keep reading commands from master
 while (true) {
-    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_read <= 0) {
-        std::cerr << "Master connection closed\n";
-        break;
+    // Only recv if we don't already have data in accumulated
+    if (accumulated.empty() || accumulated[0] != '*') {
+        bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        if (bytes_read <= 0) {
+            std::cerr << "Master connection closed\n";
+            break;
+        }
+
+        buffer[bytes_read] = '\0';
+        accumulated += std::string(buffer, bytes_read);
+        
+        std::cerr << "Received " << bytes_read << " bytes from master\n";
     }
 
-    buffer[bytes_read] = '\0';
-    accumulated += std::string(buffer, bytes_read);
-    
-    std::cerr << "Received " << bytes_read << " bytes from master\n";
+    // Process complete commands
+    while (true) {
+        if (accumulated.empty() || accumulated[0] != '*') break;
+        
+        size_t end_pos = accumulated.find("\r\n");
+        if (end_pos == std::string::npos) break;
 
-        // Process complete commands
-        while (true) {
-            if (accumulated.empty() || accumulated[0] != '*') break;
+        // Get number of elements
+        int num_elements = std::stoi(accumulated.substr(1, end_pos - 1));
+        size_t pos = end_pos + 2;
 
-            size_t end_pos = accumulated.find("\r\n");
-            if (end_pos == std::string::npos) break;
+        // Try to parse complete command
+        std::vector<std::string> tokens;
+        bool complete = true;
 
-            // Get number of elements
-            int num_elements = std::stoi(accumulated.substr(1, end_pos - 1));
-            size_t pos = end_pos + 2;
-
-            // Try to parse complete command
-            std::vector<std::string> tokens;
-            bool complete = true;
-
-            for (int i = 0; i < num_elements; i++) {
-                if (pos >= accumulated.size() || accumulated[pos] != '$') {
-                    complete = false;
-                    break;
-                }
-
-                size_t len_end = accumulated.find("\r\n", pos);
-                if (len_end == std::string::npos) {
-                    complete = false;
-                    break;
-                }
-
-                int len = std::stoi(accumulated.substr(pos + 1, len_end - pos - 1));
-                pos = len_end + 2;
-
-                if (pos + len + 2 > accumulated.size()) {
-                    complete = false;
-                    break;
-                }
-
-                tokens.push_back(accumulated.substr(pos, len));
-                pos += len + 2;
+        for (int i = 0; i < num_elements; i++) {
+            if (pos >= accumulated.size() || accumulated[pos] != '$') {
+                complete = false;
+                break;
             }
 
-            if (!complete) break;
+            size_t len_end = accumulated.find("\r\n", pos);
+            if (len_end == std::string::npos) {
+                complete = false;
+                break;
+            }
 
-            // Process the command
-            std::cerr << "Received command from master: " << tokens[0] << "\n";
-            execute_command_and_capture(tokens, master_fd);
+            int len = std::stoi(accumulated.substr(pos + 1, len_end - pos - 1));
+            pos = len_end + 2;
 
-            // Remove processed command from buffer
-            accumulated = accumulated.substr(pos);
+            if (pos + len + 2 > accumulated.size()) {
+                complete = false;
+                break;
+            }
+
+            tokens.push_back(accumulated.substr(pos, len));
+            pos += len + 2;
         }
+
+        if (!complete) break;
+
+        // Process the command
+        std::cerr << "Processing command from master: " << tokens[0] << "\n";
+        execute_command_and_capture(tokens, master_fd);
+
+        // Remove processed command from buffer
+        accumulated = accumulated.substr(pos);
     }
+}
 
     close(sock);
 }
