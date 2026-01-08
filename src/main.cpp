@@ -250,7 +250,7 @@ void load_rdb_file() {
 
     size_t i = 0;
 
-    // Skip header: "REDISxxxx"
+    // Skip header "REDISxxxx"
     if (buf.size() < 9) return;
     i = 9;
 
@@ -268,7 +268,7 @@ void load_rdb_file() {
             return len;
         }
 
-        // Other encodings not needed for this stage
+        // other encodings not needed for this stage
         return 0;
     };
 
@@ -282,9 +282,14 @@ void load_rdb_file() {
             size_t vlen = read_len(i);
             i += vlen;
         }
+        // RESIZEDB  ❗❗❗ THIS WAS MISSING
+        else if (opcode == 0xFB) {
+            read_len(i); // hash table size
+            read_len(i); // expire table size
+        }
         // SELECTDB
         else if (opcode == 0xFE) {
-            read_len(i); // db number
+            read_len(i);
         }
         // EXPIRETIME
         else if (opcode == 0xFD) {
@@ -294,26 +299,25 @@ void load_rdb_file() {
         else if (opcode == 0xFC) {
             i += 8;
         }
-        // STRING key-value pair
-       else if (opcode == 0x00) {
-    size_t key_len = read_len(i);
-    std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
-    i += key_len;  // 🔴 THIS WAS MISSING
+        // STRING key-value
+        else if (opcode == 0x00) {
+            size_t key_len = read_len(i);
+            std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
+            i += key_len;
 
-    // skip value (string)
-    size_t val_len = read_len(i);
-    i += val_len;
+            size_t val_len = read_len(i);
+            i += val_len;
 
-    rdb_keys.push_back(key);
-    return; // only one key needed
-}
-
+            rdb_keys.push_back(key);
+            return; // single key only
+        }
         // EOF
         else if (opcode == 0xFF) {
             return;
         }
     }
 }
+
 
 
 
