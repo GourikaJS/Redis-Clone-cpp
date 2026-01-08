@@ -16,6 +16,8 @@
 #include <climits>
 #include <map> 
 #include <unordered_set>
+#include <fstream>
+
 
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
