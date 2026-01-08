@@ -18,6 +18,8 @@
 #include <unordered_set>
 #include <fstream>
 
+std::string rdb_value;
+
 
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
@@ -188,29 +190,32 @@ std::string execute_command_and_capture(
     }
 
     // ---------- GET ----------
-    if (command == "GET" && tokens.size() == 2) {
-        std::lock_guard<std::mutex> lock(store_mutex);
+   if (command == "GET" && tokens.size() == 2) {
+    const std::string& key = tokens[1];
 
-        std::cerr << "GET request for key: " << tokens[1] << "\n";
-
-        auto it = store.find(tokens[1]);
-        if (it == store.end()) {
-            std::cerr << "Key not found\n";
-            return "$-1\r\n";
-        }
-
-        Value& val = it->second;
-        if (val.has_expiry &&
-            std::chrono::steady_clock::now() > val.expiry) {
-            store.erase(it);
-            std::cerr << "Key expired\n";
-            return "$-1\r\n";
-        }
-
-        std::cerr << "Key found, value: " << val.data << "\n";
-        return "$" + std::to_string(val.data.size()) + "\r\n"
-             + val.data + "\r\n";
+    // 🔴 RDB-loaded value has priority
+    if (!rdb_keys.empty() && rdb_keys[0] == key) {
+        return "$" + std::to_string(rdb_value.size()) + "\r\n" +
+               rdb_value + "\r\n";
     }
+
+    // Existing in-memory logic
+    std::lock_guard<std::mutex> lock(store_mutex);
+
+    auto it = store.find(key);
+    if (it == store.end()) return "$-1\r\n";
+
+    Value& val = it->second;
+    if (val.has_expiry &&
+        std::chrono::steady_clock::now() > val.expiry) {
+        store.erase(it);
+        return "$-1\r\n";
+    }
+
+    return "$" + std::to_string(val.data.size()) + "\r\n" +
+           val.data + "\r\n";
+}
+
 
     // ---------- INCR ----------
     if (command == "INCR" && tokens.size() == 2) {
@@ -302,14 +307,18 @@ void load_rdb_file() {
         // STRING key-value
         else if (opcode == 0x00) {
             size_t key_len = read_len(i);
-            std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
-            i += key_len;
+std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
+i += key_len;
 
-            size_t val_len = read_len(i);
-            i += val_len;
+size_t val_len = read_len(i);
+std::string value(reinterpret_cast<char*>(&buf[i]), val_len);
+i += val_len;
 
-            rdb_keys.push_back(key);
-            return; // single key only
+rdb_keys.push_back(key);
+rdb_value = value;
+
+return; // single key only
+
         }
         // EOF
         else if (opcode == 0xFF) {
