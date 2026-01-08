@@ -975,36 +975,45 @@ if (bytes_read <= 0) {
 std::string response(buffer, bytes_read);
 std::cerr << "PSYNC response received: " << bytes_read << " bytes\n";
 
-// Find the start of RDB file (after $<length>\r\n)
-size_t rdb_start = response.find("$");
-if (rdb_start != std::string::npos) {
-    size_t rdb_len_end = response.find("\r\n", rdb_start);
-    if (rdb_len_end != std::string::npos) {
-        int rdb_len = std::stoi(response.substr(rdb_start + 1, rdb_len_end - rdb_start - 1));
-        size_t rdb_data_start = rdb_len_end + 2;
-        
-        std::cerr << "RDB file length: " << rdb_len << " bytes\n";
-        
-        // Calculate how much RDB data we have
-        int received_rdb = bytes_read - rdb_data_start;
-        std::cerr << "Received " << received_rdb << " of " << rdb_len << " RDB bytes in first read\n";
-        
-        // Read remaining RDB data if needed
-        while (received_rdb < rdb_len) {
-            bytes_read = recv(sock, buffer, sizeof(buffer), 0);
-            if (bytes_read <= 0) break;
-            received_rdb += bytes_read;
+// Find FULLRESYNC response end
+size_t fullresync_end = response.find("\r\n");
+if (fullresync_end != std::string::npos) {
+    size_t pos = fullresync_end + 2;
+    
+    // Look for RDB file marker ($<length>\r\n)
+    if (pos < response.size() && response[pos] == '$') {
+        size_t rdb_len_end = response.find("\r\n", pos);
+        if (rdb_len_end != std::string::npos) {
+            int rdb_len = std::stoi(response.substr(pos + 1, rdb_len_end - pos - 1));
+            size_t rdb_data_start = rdb_len_end + 2;
+            
+            std::cerr << "RDB file length: " << rdb_len << " bytes\n";
+            
+            // Calculate how much RDB data we have
+            int received_rdb = bytes_read - rdb_data_start;
+            std::cerr << "Received " << received_rdb << " of " << rdb_len << " RDB bytes in first read\n";
+            
+            // Read remaining RDB data if needed
+            while (received_rdb < rdb_len) {
+                bytes_read = recv(sock, buffer, sizeof(buffer), 0);
+                if (bytes_read <= 0) break;
+                received_rdb += bytes_read;
+                std::cerr << "Read additional " << bytes_read << " bytes of RDB\n";
+            }
+            
+            std::cerr << "RDB file fully received\n";
+            
+            // IMPORTANT: Add any data after the RDB file to accumulated
+            size_t data_after_rdb = rdb_data_start + rdb_len;
+            if (data_after_rdb < response.size()) {
+                accumulated = response.substr(data_after_rdb);
+                std::cerr << "Found " << accumulated.size() << " bytes after RDB\n";
+            }
         }
-        
-        std::cerr << "RDB file fully received\n";
-        
-        // IMPORTANT: Add any data after the RDB file to accumulated
-        // This handles commands that arrived in the same packet as the RDB
-        size_t data_after_rdb = rdb_data_start + rdb_len;
-        if (data_after_rdb < response.size()) {
-            accumulated = response.substr(data_after_rdb);
-            std::cerr << "Found " << accumulated.size() << " bytes after RDB\n";
-        }
+    } else {
+        // No RDB file marker found - might be inline RDB or no RDB
+        // Just continue, any commands will be in the next recv
+        std::cerr << "No RDB file marker found, continuing\n";
     }
 }
 
