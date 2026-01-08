@@ -952,30 +952,62 @@ void send_replica_handshake(int replica_port) {
     recv(sock, buffer, sizeof(buffer), 0);
 
     // Step 4: PSYNC
-    std::cerr << "Sending PSYNC ? -1\n";
-    const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
-    send(sock, psync, strlen(psync), 0);
-    
-    // Read FULLRESYNC response and RDB file
-    int bytes_read = recv(sock, buffer, sizeof(buffer), 0);
-    if (bytes_read <= 0) {
-        std::cerr << "Failed to receive PSYNC response\n";
-        close(sock);
-        return;
-    }
-    
-    std::cerr << "Handshake complete, now listening for commands from master\n";
+std::cerr << "Sending PSYNC ? -1\n";
+const char* psync = "*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n";
+send(sock, psync, strlen(psync), 0);
 
-    // Keep reading commands from master
-    while (true) {
-        bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_read <= 0) {
-            std::cerr << "Master connection closed\n";
-            break;
+// Read FULLRESYNC response
+bytes_read = recv(sock, buffer, sizeof(buffer), 0);
+if (bytes_read <= 0) {
+    std::cerr << "Failed to receive PSYNC response\n";
+    close(sock);
+    return;
+}
+
+// Parse FULLRESYNC response and find RDB file
+std::string response(buffer, bytes_read);
+std::cerr << "PSYNC response received: " << bytes_read << " bytes\n";
+
+// Find the start of RDB file (after $<length>\r\n)
+size_t rdb_start = response.find("$");
+if (rdb_start != std::string::npos) {
+    size_t rdb_len_end = response.find("\r\n", rdb_start);
+    if (rdb_len_end != std::string::npos) {
+        int rdb_len = std::stoi(response.substr(rdb_start + 1, rdb_len_end - rdb_start - 1));
+        size_t rdb_data_start = rdb_len_end + 2;
+        
+        std::cerr << "RDB file length: " << rdb_len << " bytes\n";
+        
+        // Check if we received all RDB data
+        int received_rdb = bytes_read - rdb_data_start;
+        std::cerr << "Received " << received_rdb << " of " << rdb_len << " RDB bytes\n";
+        
+        // Read remaining RDB data if needed
+        while (received_rdb < rdb_len) {
+            bytes_read = recv(sock, buffer, sizeof(buffer), 0);
+            if (bytes_read <= 0) break;
+            received_rdb += bytes_read;
         }
+        
+        std::cerr << "RDB file fully received\n";
+    }
+}
 
-        buffer[bytes_read] = '\0';
-        accumulated += std::string(buffer, bytes_read);
+std::cerr << "Handshake complete, now listening for commands from master\n";
+accumulated.clear(); // Clear any leftover data
+
+// Keep reading commands from master
+while (true) {
+    bytes_read = recv(sock, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_read <= 0) {
+        std::cerr << "Master connection closed\n";
+        break;
+    }
+
+    buffer[bytes_read] = '\0';
+    accumulated += std::string(buffer, bytes_read);
+    
+    std::cerr << "Received " << bytes_read << " bytes from master\n";
 
         // Process complete commands
         while (true) {
