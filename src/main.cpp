@@ -886,15 +886,31 @@ continue;
 }
 
 // ---------- WAIT ----------
+// ---------- WAIT ----------
 else if (command == "WAIT" && tokens.size() == 3) {
-    // WAIT <numreplicas> <timeout>
-    // int numreplicas = std::stoi(tokens[1]);
-    // int timeout = std::stoi(tokens[2]);
+    int numreplicas = std::stoi(tokens[1]);
+    int timeout_ms = std::stoi(tokens[2]);
     
-    // For now, just return 0 (no replicas)
     std::lock_guard<std::mutex> lock(replica_mutex);
-    int replica_count = replica_fds.size();
     
+    // If no replicas, return 0 immediately
+    if (replica_fds.empty()) {
+        const char* response = ":0\r\n";
+        send(client_fd, response, strlen(response), 0);
+        continue;
+    }
+    
+    // Send REPLCONF GETACK to all replicas
+    const char* getack = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
+    for (int fd : replica_fds) {
+        send(fd, getack, strlen(getack), 0);
+    }
+    
+    // For now, just wait a bit and return the number of replicas
+    // (We'll implement proper ACK tracking in later stages)
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
+    int replica_count = replica_fds.size();
     std::string response = ":" + std::to_string(replica_count) + "\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
 }
