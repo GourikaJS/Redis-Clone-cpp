@@ -20,6 +20,9 @@
 std::vector<int> replica_fds;
 std::mutex replica_mutex;
 
+std::map<int, long long> replica_acks;  // Track latest ACK offset from each replica
+std::mutex ack_mutex;
+
 std::unordered_set<int> replica_connections;
 
 std::atomic<long long> replication_offset{0};
@@ -844,11 +847,22 @@ else if (command == "INFO" && tokens.size() == 2) {
 // In handle_client() function, add these with your other command handlers:
 
 // ---------- REPLCONF ----------
-else if (command == "REPLCONF") {
-    const char* ok = "+OK\r\n";
-    send(client_fd, ok, strlen(ok), 0);
+// When handling a replica connection that sends REPLCONF ACK
+if (command == "REPLCONF" && tokens.size() >= 3) {
+    std::string subcmd = tokens[1];
+    for (char &c : subcmd) c = toupper(c);
+    
+    if (subcmd == "ACK") {
+        // Store the ACK offset
+        long long offset = std::stoll(tokens[2]);
+        {
+            std::lock_guard<std::mutex> lock(ack_mutex);
+            replica_acks[client_fd] = offset;
+        }
+        // Don't send a response to ACK
+        continue;
+    }
 }
-
 // ---------- PSYNC ----------
 // ---------- PSYNC ----------
 else if (command == "PSYNC") {
