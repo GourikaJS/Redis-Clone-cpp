@@ -22,7 +22,7 @@ std::mutex replica_mutex;
 
 std::unordered_set<int> replica_connections;
 
-
+std::atomic<long long> replication_offset{0};
 std::atomic<uint64_t> stream_version{0};
 bool is_replica = false;
 // int replica_fd = -1;
@@ -1076,30 +1076,43 @@ while (true) {
 
         if (!complete) break;
 
+        // Calculate command byte length (the entire RESP array)
+        size_t command_byte_length = pos;
+
         // Process the command
-std::cerr << "Processing command from master: " << tokens[0] << "\n";
+        std::cerr << "Processing command from master: " << tokens[0] << " (" << command_byte_length << " bytes)\n";
 
-// Check if this is REPLCONF GETACK
-std::string cmd = tokens[0];
-for (char &c : cmd) c = toupper(c);
+        // Check if this is REPLCONF GETACK
+        std::string cmd = tokens[0];
+        for (char &c : cmd) c = toupper(c);
 
-if (cmd == "REPLCONF" && tokens.size() >= 3) {
-    std::string subcmd = tokens[1];
-    for (char &c : subcmd) c = toupper(c);
-    
-    if (subcmd == "GETACK") {
-        // Respond with REPLCONF ACK 0
-        const char* ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n";
-        send(master_fd, ack, strlen(ack), 0);
-        std::cerr << "Sent REPLCONF ACK 0 to master\n";
-    }
-} else {
-    // All other commands: execute but don't respond
-    execute_command_and_capture(tokens, master_fd);
-}
+        if (cmd == "REPLCONF" && tokens.size() >= 3) {
+            std::string subcmd = tokens[1];
+            for (char &c : subcmd) c = toupper(c);
+            
+            if (subcmd == "GETACK") {
+                // Respond with current offset (BEFORE adding this command's bytes)
+                long long current_offset = replication_offset.load();
+                std::string offset_str = std::to_string(current_offset);
+                std::string ack = "*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$" + 
+                                  std::to_string(offset_str.size()) + "\r\n" + 
+                                  offset_str + "\r\n";
+                send(master_fd, ack.c_str(), ack.size(), 0);
+                std::cerr << "Sent REPLCONF ACK " << current_offset << " to master\n";
+                
+                // Now add this command's bytes to offset
+                replication_offset.fetch_add(command_byte_length);
+            }
+        } else {
+            // All other commands: execute but don't respond
+            execute_command_and_capture(tokens, master_fd);
+            
+            // Add bytes to offset
+            replication_offset.fetch_add(command_byte_length);
+        }
 
-// Remove processed command from buffer
-accumulated = accumulated.substr(pos);
+        // Remove processed command from buffer
+        accumulated = accumulated.substr(pos);
     }
 }
 
