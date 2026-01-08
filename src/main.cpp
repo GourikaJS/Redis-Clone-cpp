@@ -295,12 +295,19 @@ void load_rdb_file() {
             i += 8;
         }
         // STRING key-value pair
-        else if (opcode == 0x00) {
-            size_t key_len = read_len(i);
-            std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
-            rdb_keys.push_back(key);
-            return; // only one key needed for JZ6
-        }
+       else if (opcode == 0x00) {
+    size_t key_len = read_len(i);
+    std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
+    i += key_len;  // 🔴 THIS WAS MISSING
+
+    // skip value (string)
+    size_t val_len = read_len(i);
+    i += val_len;
+
+    rdb_keys.push_back(key);
+    return; // only one key needed
+}
+
         // EOF
         else if (opcode == 0xFF) {
             return;
