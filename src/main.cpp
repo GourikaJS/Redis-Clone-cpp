@@ -156,6 +156,8 @@ std::string execute_command_and_capture(
         }
 
         store[tokens[1]] = val;
+
+        master_repl_offset++;
         
         std::cerr << "SET executed: " << tokens[1] << " = " << tokens[2] << "\n";
 
