@@ -885,8 +885,7 @@ continue;
 
 }
 
-// ---------- WAIT ----------
-// ---------- WAIT ----------
+
 // ---------- WAIT ----------
 else if (command == "WAIT" && tokens.size() == 3) {
     int numreplicas = std::stoi(tokens[1]);
@@ -901,43 +900,40 @@ else if (command == "WAIT" && tokens.size() == 3) {
         continue;
     }
     
+    // Clear previous ACKs
+    {
+        std::lock_guard<std::mutex> alock(ack_mutex);
+        replica_acks.clear();
+    }
+    
     // Send REPLCONF GETACK to all replicas
     const char* getack = "*3\r\n$8\r\nREPLCONF\r\n$6\r\nGETACK\r\n$1\r\n*\r\n";
     for (int fd : replica_fds) {
         send(fd, getack, strlen(getack), 0);
     }
     
-    // Wait for ACK responses from replicas
-    int ack_count = 0;
+    // Wait for ACKs with timeout
     auto start_time = std::chrono::steady_clock::now();
+    int ack_count = 0;
     
-    for (int fd : replica_fds) {
+    while (true) {
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start_time
         ).count();
         
-        int remaining_timeout = timeout_ms - elapsed;
-        if (remaining_timeout <= 0) break;
+        if (elapsed >= timeout_ms) break;
         
-        // Set timeout for this replica's response
-        struct timeval tv;
-        tv.tv_sec = remaining_timeout / 1000;
-        tv.tv_usec = (remaining_timeout % 1000) * 1000;
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        
-        // Try to read ACK response
-        char ack_buffer[1024];
-        int bytes = recv(fd, ack_buffer, sizeof(ack_buffer), 0);
-        
-        if (bytes > 0) {
-            // Successfully received a response
-            ack_count++;
-            
-            // If we have enough ACKs, stop early
-            if (ack_count >= numreplicas) {
-                break;
-            }
+        // Check how many ACKs we've received
+        {
+            std::lock_guard<std::mutex> alock(ack_mutex);
+            ack_count = replica_acks.size();
         }
+        
+        // If we have enough, return early
+        if (ack_count >= numreplicas) break;
+        
+        // Small sleep to avoid busy waiting
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     
     std::string response = ":" + std::to_string(ack_count) + "\r\n";
