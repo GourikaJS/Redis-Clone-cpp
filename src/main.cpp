@@ -18,13 +18,14 @@
 #include <unordered_set>
 #include <fstream>
 
-std::string rdb_value;
+
 
 
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
 
 std::vector<std::string> rdb_keys;
+std::unordered_map<std::string, std::string> rdb_kv;
 
 
 std::vector<int> replica_fds;
@@ -317,7 +318,7 @@ i += val_len;
 rdb_keys.push_back(key);
 rdb_value = value;
 
-return; // single key only
+continue; // single key only
 
         }
         // EOF
@@ -1121,7 +1122,7 @@ else if (command == "KEYS" && tokens.size() == 2) {
     }
 
     std::string response = "*" + std::to_string(rdb_keys.size()) + "\r\n";
-    for (auto &key : rdb_keys) {
+    for (const auto& key : rdb_keys) {
         response += "$" + std::to_string(key.size()) + "\r\n";
         response += key + "\r\n";
     }
