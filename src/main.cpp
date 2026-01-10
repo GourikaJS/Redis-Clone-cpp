@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <string>
 #include <cstring>
+#include <cmath>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -443,6 +444,28 @@ std::pair<double, double> decode_geohash(uint64_t hash) {
     double lon = (min_lon + max_lon) / 2.0;
     double lat = (min_lat + max_lat) / 2.0;
     return {lon, lat};
+}
+
+
+
+double calculate_haversine(double lon1, double lat1, double lon2, double lat2) {
+    const double EARTH_RADIUS_METERS = 6372797.560856;
+    
+    // Convert degrees to radians
+    auto to_rad = [](double degree) { return degree * M_PI / 180.0; };
+    
+    double dlat = to_rad(lat2 - lat1);
+    double dlon = to_rad(lon2 - lon1);
+    
+    double lat1_rad = to_rad(lat1);
+    double lat2_rad = to_rad(lat2);
+    
+    double a = std::pow(std::sin(dlat / 2.0), 2) +
+               std::cos(lat1_rad) * std::cos(lat2_rad) * std::pow(std::sin(dlon / 2.0), 2);
+               
+    double c = 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+    
+    return EARTH_RADIUS_METERS * c;
 }
 
 
@@ -1759,6 +1782,55 @@ else if (command == "GEOPOS" && tokens.size() >= 3) {
     continue;
 }
 
+
+// ---------- GEODIST ----------
+else if (command == "GEODIST" && tokens.size() >= 4) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    std::string key = tokens[1];
+    std::string m1 = tokens[2];
+    std::string m2 = tokens[3];
+
+    auto it = sorted_sets.find(key);
+    if (it == sorted_sets.end()) {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
+
+    auto& zset = it->second;
+    double score1 = -1, score2 = -1;
+    bool f1 = false, f2 = false;
+
+    // Find scores for both members
+    for (const auto& entry : zset) {
+        if (entry.member == m1) { score1 = entry.score; f1 = true; }
+        if (entry.member == m2) { score2 = entry.score; f2 = true; }
+        if (f1 && f2) break;
+    }
+
+    if (f1 && f2) {
+        // 1. Decode geohashes to coordinates
+        auto coord1 = decode_geohash(static_cast<uint64_t>(score1));
+        auto coord2 = decode_geohash(static_cast<uint64_t>(score2));
+
+        // 2. Calculate distance
+        double distance = calculate_haversine(coord1.first, coord1.second, 
+                                             coord2.first, coord2.second);
+
+        // 3. Format as Bulk String (precision up to 4 decimal places)
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(4) << distance;
+        std::string dist_s = oss.str();
+
+        std::string response = "$" + std::to_string(dist_s.size()) + "\r\n" + dist_s + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    } else {
+        // One or both members don't exist
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+    }
+    continue;
+}
 
     }
    {
