@@ -446,11 +446,31 @@ if (is_subscribed_mode && allowed_in_sub.find(command) == allowed_in_sub.end()) 
 // Now your normal command handling continues...
 
         // ---------- PING ----------
-        if (command == "PING") {
-            const char* pong = "+PONG\r\n";
-            send(client_fd, pong, strlen(pong), 0);
+      
+if (command == "PING") {
+    // Check if the client is in "Subscribed Mode"
+    bool is_subscribed_mode = false;
+    {
+        std::lock_guard<std::mutex> lock(sub_mutex);
+        if (client_subscriptions.count(client_fd) && !client_subscriptions[client_fd].empty()) {
+            is_subscribed_mode = true;
         }
+    }
 
+    if (is_subscribed_mode) {
+        // Special response for subscribed mode: ["pong", ""]
+        // *2\r\n       <- Array of 2
+        // $4\r\npong\r\n <- Bulk string "pong"
+        // $0\r\n\r\n     <- Empty bulk string
+        std::string response = "*2\r\n$4\r\npong\r\n$0\r\n\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    } else {
+        // Normal response for non-subscribed clients
+        const char* pong = "+PONG\r\n";
+        send(client_fd, pong, strlen(pong), 0);
+    }
+    continue;
+}
         // ---------- ECHO ----------
         else if (command == "ECHO" && tokens.size() == 2) {
             std::string& msg = tokens[1];
