@@ -417,6 +417,32 @@ if (client_fd != master_fd &&
 }
 
 
+// ... after parsing tokens and command normalization ...
+for (auto& c : command) c = toupper(c);
+
+// 1. Check if the client is in "Subscribed Mode"
+bool is_subscribed_mode = false;
+{
+    std::lock_guard<std::mutex> lock(sub_mutex);
+    if (client_subscriptions.count(client_fd) && !client_subscriptions[client_fd].empty()) {
+        is_subscribed_mode = true;
+    }
+}
+
+// 2. Define Allowed Commands
+std::unordered_set<std::string> allowed_in_sub = {
+    "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "PING", "QUIT", "RESET"
+};
+
+// 3. If in subscribed mode, reject unallowed commands
+if (is_subscribed_mode && allowed_in_sub.find(command) == allowed_in_sub.end()) {
+    std::string err_msg = "-ERR Can't execute '" + tokens[0] + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n";
+    send(client_fd, err_msg.c_str(), err_msg.size(), 0);
+    continue; // Skip the rest of the command handling for this input
+}
+
+// ... rest of your command handlers (PING, ECHO, SET, etc.) follow here ...
+
 // Now your normal command handling continues...
 
         // ---------- PING ----------
