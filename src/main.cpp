@@ -309,24 +309,24 @@ void load_rdb_file() {
             i += 4;
         }
         // EXPIRETIME_MS
-        else if (opcode == 0xFC) {
-            i += 8;
-        }
-        // STRING key-value
+      // STRING key-value
         else if (opcode == 0x00) {
             size_t key_len = read_len(i);
-std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
-i += key_len;
+            std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
+            i += key_len;
 
-size_t val_len = read_len(i);
-std::string value(reinterpret_cast<char*>(&buf[i]), val_len);
-i += val_len;
+            size_t val_len = read_len(i);
+            std::string value(reinterpret_cast<char*>(&buf[i]), val_len);
+            i += val_len;
 
-rdb_keys.push_back(key);
-
-
-continue; // single key only
-
+            // Store BOTH the key and the key-value pair
+            rdb_keys.push_back(key);
+            rdb_kv[key] = value;
+            
+            std::cerr << "Loaded RDB key: " << key << " = " << value << "\n";
+            
+            // REMOVE THIS LINE - it stops after one key!
+            // continue;
         }
         // EOF
         else if (opcode == 0xFF) {
