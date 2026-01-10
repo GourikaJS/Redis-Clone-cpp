@@ -388,11 +388,13 @@ void handle_client(int client_fd) {
     while (true) {
         int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
         // if (bytes_read <= 0) break;
+        
         if (bytes_read <= 0) {
             std::lock_guard<std::mutex> lock(sub_mutex);
             client_subscriptions.erase(client_fd); // Cleanup: Stop tracking this client
             close(client_fd);                      // Close the socket
-            return;
+            return;                                // Exit the thread
+        }
 
         buffer[bytes_read] = '\0';
         std::string input(buffer);
