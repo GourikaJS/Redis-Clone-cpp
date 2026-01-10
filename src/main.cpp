@@ -24,6 +24,16 @@
 #include <sstream>
 #include <deque>
 
+// --- Global storage for Blocking Operations ---
+struct BlockedClient {
+    int fd;
+    std::condition_variable cv;
+};
+
+// Maps a list key to a queue of blocked clients
+std::unordered_map<std::string, std::deque<std::shared_ptr<BlockedClient>>> blocked_clients;
+std::mutex blocking_mutex;
+
 // --- Global storage for Redis Lists ---
 std::unordered_map<std::string, std::deque<std::string>> redis_lists;
 std::mutex list_mutex;
@@ -2157,20 +2167,40 @@ else if (command == "LRANGE" && tokens.size() >= 4) {
 
 // ---------- LPUSH ----------
 else if (command == "LPUSH" && tokens.size() >= 3) {
-    std::lock_guard<std::mutex> lock(list_mutex);
-    
     std::string key = tokens[1];
     
-    // Elements are prepended one by one.
-    // LPUSH key a b c results in [c, b, a]
-    for (size_t i = 2; i < tokens.size(); ++i) {
-        redis_lists[key].push_front(tokens[i]);
+    {
+        std::lock_guard<std::mutex> lock(list_mutex);
+        
+        // 1. Prepend elements one by one (LPUSH key a b c -> [c, b, a])
+        for (size_t i = 2; i < tokens.size(); ++i) {
+            redis_lists[key].push_front(tokens[i]);
+        }
+
+        // 2. Notify waiting BLPOP clients (if any)
+        // We notify inside the lock to ensure a blocked client can 
+        // immediately see the data once they wake up.
+        {
+            std::lock_guard<std::mutex> b_lock(blocking_mutex);
+            if (blocked_clients.count(key) && !blocked_clients[key].empty()) {
+                // Get the client that has been waiting the longest (FIFO)
+                auto client = blocked_clients[key].front();
+                blocked_clients[key].pop_front();
+                
+                // Wake up the thread specifically waiting for this key
+                client->cv.notify_one(); 
+            }
+        }
     }
 
-    // Return the number of elements in the list after the operations
-    int list_size = redis_lists[key].size();
-    std::string response = ":" + std::to_string(list_size) + "\r\n";
+    // 3. Return the new length of the list to the LPUSH client
+    int list_size;
+    {
+        std::lock_guard<std::mutex> lock(list_mutex);
+        list_size = redis_lists[key].size();
+    }
     
+    std::string response = ":" + std::to_string(list_size) + "\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
@@ -2247,6 +2277,55 @@ else if (command == "LPOP" && tokens.size() >= 2) {
 
         std::string response = "$" + std::to_string(first_element.size()) + "\r\n" + first_element + "\r\n";
         send(client_fd, response.c_str(), response.size(), 0);
+    }
+    continue;
+}
+
+
+// ---------- BLPOP ----------
+else if (command == "BLPOP" && tokens.size() >= 3) {
+    std::string key = tokens[1];
+    int timeout = std::stoi(tokens[2]); // For now, always 0 (infinite)
+
+    std::unique_lock<std::mutex> lock(list_mutex);
+    
+    // 1. If the list is NOT empty, act like LPOP immediately
+    if (redis_lists.count(key) && !redis_lists[key].empty()) {
+        std::string val = redis_lists[key].front();
+        redis_lists[key].pop_front();
+        if (redis_lists[key].empty()) redis_lists.erase(key);
+        lock.unlock();
+
+        // Response format: [key, value]
+        std::string res = "*2\r\n$" + std::to_string(key.size()) + "\r\n" + key + "\r\n" +
+                          "$" + std::to_string(val.size()) + "\r\n" + val + "\r\n";
+        send(client_fd, res.c_str(), res.size(), 0);
+    } 
+    else {
+        // 2. List is empty: Enter blocking state
+        auto client = std::make_shared<BlockedClient>();
+        client->fd = client_fd;
+
+        {
+            std::lock_guard<std::mutex> b_lock(blocking_mutex);
+            blocked_clients[key].push_back(client);
+        }
+
+        // Wait indefinitely (timeout 0)
+        // In a real implementation, this condition would be triggered by RPUSH
+        client->cv.wait(lock, [&]() { 
+            return redis_lists.count(key) && !redis_lists[key].empty(); 
+        });
+
+        // 3. Woken up! Pop the element that was just pushed
+        std::string val = redis_lists[key].front();
+        redis_lists[key].pop_front();
+        if (redis_lists[key].empty()) redis_lists.erase(key);
+        lock.unlock();
+
+        std::string res = "*2\r\n$" + std::to_string(key.size()) + "\r\n" + key + "\r\n" +
+                          "$" + std::to_string(val.size()) + "\r\n" + val + "\r\n";
+        send(client_fd, res.c_str(), res.size(), 0);
     }
     continue;
 }
