@@ -102,6 +102,20 @@ struct StreamEntry {
     std::vector<std::pair<std::string, std::string>> fields;
 };
 
+struct SortedSetMember {
+    std::string member;
+    double score;
+
+    // Helpful for later stages: define order by score, then lexicographically by member name
+    bool operator<(const SortedSetMember& other) const {
+        if (score != other.score) return score < other.score;
+        return member < other.member;
+    }
+};
+
+// Key -> List of members (keeping them sorted)
+std::unordered_map<std::string, std::vector<SortedSetMember>> sorted_sets;
+std::mutex zset_mutex;
 
 std::unordered_map<std::string, std::vector<StreamEntry>> streams;
 
@@ -1334,6 +1348,52 @@ else if (command == "UNSUBSCRIBE") {
     continue;
 }
 
+// ---------- ZADD ----------
+else if (command == "ZADD" && tokens.size() >= 4) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    int added_count = 0;
+
+    // ZADD can take multiple score-member pairs: ZADD key score member [score member...]
+    for (size_t i = 2; i + 1 < tokens.size(); i += 2) {
+        try {
+            double score = std::stod(tokens[i]);
+            std::string member = tokens[i+1];
+
+            auto& zset = sorted_sets[key];
+            
+            // Check if member already exists (simple linear search for now)
+            bool found = false;
+            for (auto& entry : zset) {
+                if (entry.member == member) {
+                    entry.score = score; // Update score if it exists
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) {
+                zset.push_back({member, score});
+                added_count++;
+            }
+            
+            // Re-sort the set to maintain order (important for later stages)
+            std::sort(zset.begin(), zset.end());
+
+        } catch (...) {
+            const char* err = "-ERR value is not a valid float\r\n";
+            send(client_fd, err, strlen(err), 0);
+            goto zadd_done; 
+        }
+    }
+
+    std::string response = ":" + std::to_string(added_count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+
+    zadd_done:;
+    continue;
+}
 
 
     }
