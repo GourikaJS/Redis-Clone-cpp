@@ -190,35 +190,27 @@ std::string execute_command_and_capture(
         return "+OK\r\n";
     }
 
-    // ---------- GET ----------
-   if (command == "GET" && tokens.size() == 2) {
-    const std::string& key = tokens[1];
+// ---------- GET ----------
+if (command == "GET" && tokens.size() == 2) {
+    std::string key = tokens[1];
 
-    // 🔴 RDB-loaded value has priority
-    auto it = rdb_kv.find(key);
-if (it != rdb_kv.end()) {
-    const std::string& value = it->second;
+    // 1️⃣ Check RDB-loaded data first
+    auto rdb_it = rdb_kv.find(key);
+    if (rdb_it != rdb_kv.end()) {
+        const std::string& value = rdb_it->second;
+        return "$" + std::to_string(value.size()) + "\r\n" +
+               value + "\r\n";
+    }
+
+    // 2️⃣ Check in-memory store
+    auto store_it = store.find(key);
+    if (store_it == store.end()) return "$-1\r\n";
+
+    const std::string& value = store_it->second.data;
     return "$" + std::to_string(value.size()) + "\r\n" +
            value + "\r\n";
 }
 
-
-    // Existing in-memory logic
-    std::lock_guard<std::mutex> lock(store_mutex);
-
-    auto it = store.find(key);
-    if (it == store.end()) return "$-1\r\n";
-
-    Value& val = it->second;
-    if (val.has_expiry &&
-        std::chrono::steady_clock::now() > val.expiry) {
-        store.erase(it);
-        return "$-1\r\n";
-    }
-
-    return "$" + std::to_string(val.data.size()) + "\r\n" +
-           val.data + "\r\n";
-}
 
 
     // ---------- INCR ----------
