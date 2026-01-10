@@ -1349,13 +1349,14 @@ else if (command == "UNSUBSCRIBE") {
 }
 
 // ---------- ZADD ----------
+// ---------- ZADD ----------
 else if (command == "ZADD" && tokens.size() >= 4) {
     std::lock_guard<std::mutex> lock(zset_mutex);
     
     std::string key = tokens[1];
     int added_count = 0;
+    bool error_occurred = false;
 
-    // ZADD can take multiple score-member pairs: ZADD key score member [score member...]
     for (size_t i = 2; i + 1 < tokens.size(); i += 2) {
         try {
             double score = std::stod(tokens[i]);
@@ -1363,11 +1364,10 @@ else if (command == "ZADD" && tokens.size() >= 4) {
 
             auto& zset = sorted_sets[key];
             
-            // Check if member already exists (simple linear search for now)
             bool found = false;
             for (auto& entry : zset) {
                 if (entry.member == member) {
-                    entry.score = score; // Update score if it exists
+                    entry.score = score;
                     found = true;
                     break;
                 }
@@ -1378,20 +1378,21 @@ else if (command == "ZADD" && tokens.size() >= 4) {
                 added_count++;
             }
             
-            // Re-sort the set to maintain order (important for later stages)
             std::sort(zset.begin(), zset.end());
 
         } catch (...) {
             const char* err = "-ERR value is not a valid float\r\n";
             send(client_fd, err, strlen(err), 0);
-            goto zadd_done; 
+            error_occurred = true;
+            break; // Stop processing and exit the loop
         }
     }
 
-    std::string response = ":" + std::to_string(added_count) + "\r\n";
-    send(client_fd, response.c_str(), response.size(), 0);
-
-    zadd_done:;
+    if (!error_occurred) {
+        std::string response = ":" + std::to_string(added_count) + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    }
+    
     continue;
 }
 
