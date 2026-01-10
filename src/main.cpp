@@ -22,6 +22,7 @@
 #include <openssl/evp.h> 
 #include <iomanip>
 #include <sstream>
+#include <deque>
 
 // --- Global storage for Redis Lists ---
 std::unordered_map<std::string, std::deque<std::string>> redis_lists;
