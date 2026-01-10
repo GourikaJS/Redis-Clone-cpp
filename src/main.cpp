@@ -1259,7 +1259,6 @@ else if (command == "SUBSCRIBE" && tokens.size() >= 2) {
 
 
 // ---------- PUBLISH ----------
-// ---------- PUBLISH ----------
 else if (command == "PUBLISH" && tokens.size() == 3) {
     std::string channel = tokens[1];
     std::string message = tokens[2];
@@ -1287,6 +1286,55 @@ else if (command == "PUBLISH" && tokens.size() == 3) {
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
+
+// ---------- UNSUBSCRIBE ----------
+else if (command == "UNSUBSCRIBE") {
+    std::lock_guard<std::mutex> lock(sub_mutex);
+    
+    // If no channels are specified, Redis typically unsubscribes from ALL.
+    // However, for this stage, the tester sends specific channels.
+    if (tokens.size() == 1) {
+        // Handle unsubscription from all channels for this client
+        std::vector<std::string> current_subs(client_subscriptions[client_fd].begin(), 
+                                            client_subscriptions[client_fd].end());
+        
+        if (current_subs.empty()) {
+            // Even if not subscribed to anything, Redis returns a null-ish response
+            std::string response = "*3\r\n$11\r\nunsubscribe\r\n$-1\r\n:0\r\n";
+            send(client_fd, response.c_str(), response.size(), 0);
+        } else {
+            for (const auto& channel : current_subs) {
+                client_subscriptions[client_fd].erase(channel);
+                int remaining = client_subscriptions[client_fd].size();
+                std::string response = "*3\r\n$11\r\nunsubscribe\r\n";
+                response += "$" + std::to_string(channel.size()) + "\r\n" + channel + "\r\n";
+                response += ":" + std::to_string(remaining) + "\r\n";
+                send(client_fd, response.c_str(), response.size(), 0);
+            }
+        }
+    } else {
+        // Unsubscribe from specific channels provided in tokens
+        for (size_t i = 1; i < tokens.size(); ++i) {
+            std::string channel = tokens[i];
+            
+            // Remove the channel (erase returns 1 if removed, 0 if it wasn't there)
+            client_subscriptions[client_fd].erase(channel);
+            
+            int remaining = client_subscriptions[client_fd].size();
+
+            // Construct the RESP Array: ["unsubscribe", channel, remaining_count]
+            std::string response = "*3\r\n";
+            response += "$11\r\nunsubscribe\r\n";
+            response += "$" + std::to_string(channel.size()) + "\r\n" + channel + "\r\n";
+            response += ":" + std::to_string(remaining) + "\r\n";
+
+            send(client_fd, response.c_str(), response.size(), 0);
+        }
+    }
+    continue;
+}
+
+
 
     }
    {
