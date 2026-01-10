@@ -1832,6 +1832,62 @@ else if (command == "GEODIST" && tokens.size() >= 4) {
     continue;
 }
 
+// ---------- GEOSEARCH ----------
+else if (command == "GEOSEARCH" && tokens.size() >= 7) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    double center_lon = 0, center_lat = 0, radius = 0;
+    std::string unit = "m";
+
+    // 1. Parse Arguments: GEOSEARCH key FROMLONLAT lon lat BYRADIUS dist unit
+    for (size_t i = 2; i < tokens.size(); ++i) {
+        if (tokens[i] == "FROMLONLAT" && i + 2 < tokens.size()) {
+            center_lon = std::stod(tokens[i + 1]);
+            center_lat = std::stod(tokens[i + 2]);
+            i += 2;
+        } else if (tokens[i] == "BYRADIUS" && i + 2 < tokens.size()) {
+            radius = std::stod(tokens[i + 1]);
+            unit = tokens[i + 2];
+            i += 2;
+        }
+    }
+
+    // Convert units to meters (Redis supports m, km, mi, ft)
+    double radius_meters = radius;
+    if (unit == "km") radius_meters *= 1000.0;
+    else if (unit == "mi") radius_meters *= 1609.34;
+    else if (unit == "ft") radius_meters *= 0.3048;
+
+    std::vector<std::string> results;
+
+    // 2. Search logic
+    auto it = sorted_sets.find(key);
+    if (it != sorted_sets.end()) {
+        for (const auto& entry : it->second) {
+            // Decode coordinates from stored geohash (score)
+            auto coords = decode_geohash(static_cast<uint64_t>(entry.score));
+            
+            // Calculate distance from center to this member
+            double dist = calculate_haversine(center_lon, center_lat, coords.first, coords.second);
+            
+            if (dist <= radius_meters) {
+                results.push_back(entry.member);
+            }
+        }
+    }
+
+    // 3. Construct RESP Array Response
+    std::string response = "*" + std::to_string(results.size()) + "\r\n";
+    for (const auto& member : results) {
+        response += "$" + std::to_string(member.size()) + "\r\n" + member + "\r\n";
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
