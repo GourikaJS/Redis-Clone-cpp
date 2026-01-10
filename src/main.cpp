@@ -1489,6 +1489,26 @@ else if (command == "ZRANGE" && tokens.size() == 4) {
     continue;
 }
 
+// ---------- ZCARD ----------
+else if (command == "ZCARD" && tokens.size() == 2) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    int count = 0;
+
+    // Check if the key exists in our sorted_sets map
+    auto it = sorted_sets.find(key);
+    if (it != sorted_sets.end()) {
+        count = (int)it->second.size();
+    }
+
+    // Return the count as a RESP Integer (:count\r\n)
+    // If key wasn't found, count remains 0, which is the correct Redis behavior
+    std::string response = ":" + std::to_string(count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
