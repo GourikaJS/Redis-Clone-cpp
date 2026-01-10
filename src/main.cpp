@@ -2286,12 +2286,14 @@ else if (command == "LPOP" && tokens.size() >= 2) {
     continue;
 }
 
-// ---------- BLPOP (Fixed) ----------
+// ---------- BLPOP (with Timeout Support) ----------
 else if (command == "BLPOP" && tokens.size() >= 3) {
     std::string key = tokens[1];
+    double timeout_sec = std::stod(tokens[2]); // Parse timeout as double
+
     std::unique_lock<std::mutex> lock(list_mutex);
     
-    // 1. Immediate check
+    // 1. Immediate Check
     if (redis_lists.count(key) && !redis_lists[key].empty()) {
         std::string val = redis_lists[key].front();
         redis_lists[key].pop_front();
@@ -2303,26 +2305,49 @@ else if (command == "BLPOP" && tokens.size() >= 3) {
         send(client_fd, res.c_str(), res.size(), 0);
     } 
     else {
-        // 2. Block
+        // 2. Blocking Case with Timeout
         auto client = std::make_shared<BlockedClient>();
         {
             std::lock_guard<std::mutex> b_lock(blocking_mutex);
             blocked_clients[key].push_back(client);
         }
 
-        // The wait releases list_mutex and re-acquires it when woken
-        client->cv.wait(lock, [&]() { 
-            return redis_lists.count(key) && !redis_lists[key].empty(); 
-        });
+        bool timed_out = false;
+        if (timeout_sec > 0) {
+            // Wait for the specified duration
+            auto duration = std::chrono::milliseconds(static_cast<long long>(timeout_sec * 1000));
+            if (!client->cv.wait_for(lock, duration, [&]() { 
+                return redis_lists.count(key) && !redis_lists[key].empty(); 
+            })) {
+                timed_out = true;
+            }
+        } else {
+            // Timeout 0 means wait indefinitely
+            client->cv.wait(lock, [&]() { 
+                return redis_lists.count(key) && !redis_lists[key].empty(); 
+            });
+        }
 
-        std::string val = redis_lists[key].front();
-        redis_lists[key].pop_front();
-        if (redis_lists[key].empty()) redis_lists.erase(key);
-        lock.unlock();
+        // 3. Handle Result
+        if (timed_out) {
+            // Remove the client from the blocked queue if it timed out
+            std::lock_guard<std::mutex> b_lock(blocking_mutex);
+            auto& queue = blocked_clients[key];
+            queue.erase(std::remove(queue.begin(), queue.end(), client), queue.end());
+            
+            const char* nil_array = "*-1\r\n"; // Return null array on timeout
+            send(client_fd, nil_array, strlen(nil_array), 0);
+        } else {
+            // Successfully woken by a PUSH
+            std::string val = redis_lists[key].front();
+            redis_lists[key].pop_front();
+            if (redis_lists[key].empty()) redis_lists.erase(key);
+            lock.unlock();
 
-        std::string res = "*2\r\n$" + std::to_string(key.size()) + "\r\n" + key + "\r\n" +
-                          "$" + std::to_string(val.size()) + "\r\n" + val + "\r\n";
-        send(client_fd, res.c_str(), res.size(), 0);
+            std::string res = "*2\r\n$" + std::to_string(key.size()) + "\r\n" + key + "\r\n" +
+                              "$" + std::to_string(val.size()) + "\r\n" + val + "\r\n";
+            send(client_fd, res.c_str(), res.size(), 0);
+        }
     }
     continue;
 }
