@@ -1889,19 +1889,39 @@ else if (command == "GEOSEARCH" && tokens.size() >= 7) {
 
 
 // ---------- ACL ----------
+// ---------- ACL ----------
 else if (command == "ACL" && tokens.size() >= 2) {
     std::string sub_command = tokens[1];
     std::transform(sub_command.begin(), sub_command.end(), sub_command.begin(), ::toupper);
 
     if (sub_command == "WHOAMI") {
-        // Return "default" as a RESP Bulk String
-        // $7\r\n       <- Length of "default" is 7
-        // default\r\n
         const char* response = "$7\r\ndefault\r\n";
         send(client_fd, response, strlen(response), 0);
-    } else {
-        // Optional: Handle unknown ACL sub-commands
-        std::string err = "-ERR Unknown ACL subcommand '" + tokens[1] + "'\r\n";
+    } 
+    // New sub-command handler for GETUSER
+    else if (sub_command == "GETUSER" && tokens.size() >= 3) {
+        std::string username = tokens[2];
+        
+        if (username == "default") {
+            /* We need to return a RESP Array with 2 elements:
+               1. Bulk String "flags"
+               2. Empty Array []
+               
+               RESP Encoding:
+               *2\r\n         <- Array of 2 elements
+               $5\r\nflags\r\n <- Element 1: Bulk String "flags"
+               *0\r\n         <- Element 2: Empty Array
+            */
+            const char* response = "*2\r\n$5\r\nflags\r\n*0\r\n";
+            send(client_fd, response, strlen(response), 0);
+        } else {
+            // Redis returns Nil if the user doesn't exist
+            const char* nil = "$-1\r\n";
+            send(client_fd, nil, strlen(nil), 0);
+        }
+    }
+    else {
+        std::string err = "-ERR Unknown ACL subcommand or wrong number of arguments\r\n";
         send(client_fd, err.c_str(), err.size(), 0);
     }
     continue;
