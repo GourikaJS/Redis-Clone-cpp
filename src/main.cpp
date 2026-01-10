@@ -23,6 +23,8 @@
 #include <iomanip>
 #include <sstream>
 #include <deque>
+#include <condition_variable> 
+#include <memory>
 
 // --- Global storage for Blocking Operations ---
 struct BlockedClient {
@@ -2168,38 +2170,59 @@ else if (command == "LRANGE" && tokens.size() >= 4) {
 // ---------- LPUSH ----------
 else if (command == "LPUSH" && tokens.size() >= 3) {
     std::string key = tokens[1];
-    
+    int list_size = 0;
+
     {
         std::lock_guard<std::mutex> lock(list_mutex);
         
-        // 1. Prepend elements one by one (LPUSH key a b c -> [c, b, a])
+        // Prepend elements
         for (size_t i = 2; i < tokens.size(); ++i) {
             redis_lists[key].push_front(tokens[i]);
         }
+        list_size = redis_lists[key].size();
 
-        // 2. Notify waiting BLPOP clients (if any)
-        // We notify inside the lock to ensure a blocked client can 
-        // immediately see the data once they wake up.
+        // Notify BLPOP clients
         {
             std::lock_guard<std::mutex> b_lock(blocking_mutex);
             if (blocked_clients.count(key) && !blocked_clients[key].empty()) {
-                // Get the client that has been waiting the longest (FIFO)
                 auto client = blocked_clients[key].front();
                 blocked_clients[key].pop_front();
-                
-                // Wake up the thread specifically waiting for this key
                 client->cv.notify_one(); 
             }
         }
     }
 
-    // 3. Return the new length of the list to the LPUSH client
-    int list_size;
+    std::string response = ":" + std::to_string(list_size) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
+
+// ---------- RPUSH ----------
+else if (command == "RPUSH" && tokens.size() >= 3) {
+    std::string key = tokens[1];
+    int list_size = 0;
+
     {
         std::lock_guard<std::mutex> lock(list_mutex);
+        
+        // Append elements
+        for (size_t i = 2; i < tokens.size(); ++i) {
+            redis_lists[key].push_back(tokens[i]);
+        }
         list_size = redis_lists[key].size();
+
+        // Notify BLPOP clients
+        {
+            std::lock_guard<std::mutex> b_lock(blocking_mutex);
+            if (blocked_clients.count(key) && !blocked_clients[key].empty()) {
+                auto client = blocked_clients[key].front();
+                blocked_clients[key].pop_front();
+                client->cv.notify_one(); 
+            }
+        }
     }
-    
+
     std::string response = ":" + std::to_string(list_size) + "\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
