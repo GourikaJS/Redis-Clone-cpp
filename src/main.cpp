@@ -24,6 +24,9 @@
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
 
+std::map<int, std::unordered_set<std::string>> client_subscriptions;
+std::mutex sub_mutex;
+
 std::unordered_map<std::string, long long> rdb_expiry;  // Store expiry times in milliseconds
 
 std::vector<std::string> rdb_keys;
@@ -1174,6 +1177,31 @@ else if (command == "KEYS" && tokens.size() == 2) {
     }
 
     send(client_fd, response.c_str(), response.size(), 0);
+}
+
+// ---------- SUBSCRIBE ----------
+else if (command == "SUBSCRIBE" && tokens.size() >= 2) {
+    std::lock_guard<std::mutex> lock(sub_mutex);
+    
+    // In this stage, we handle one or more channels passed to SUBSCRIBE
+    for (size_t i = 1; i < tokens.size(); ++i) {
+        std::string channel = tokens[i];
+        client_subscriptions[client_fd].insert(channel);
+        
+        int num_subs = client_subscriptions[client_fd].size();
+        
+        // Construct the RESP Array response: ["subscribe", channel, num_subs]
+        std::string response = "*3\r\n";
+        response += "$9\r\nsubscribe\r\n";
+        response += "$" + std::to_string(channel.size()) + "\r\n" + channel + "\r\n";
+        response += ":" + std::to_string(num_subs) + "\r\n";
+        
+        send(client_fd, response.c_str(), response.size(), 0);
+    }
+    
+    // Note: In a full Redis implementation, once a client is subscribed, 
+    // it can only send SUBSCRIBE, UNSUBSCRIBE, PING, or RESET. 
+    // For this stage, simply sending the response is enough to pass.
 }
 
 
