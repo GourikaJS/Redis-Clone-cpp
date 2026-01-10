@@ -11,7 +11,6 @@
 #include <netdb.h>
 #include <thread>
 #include <unordered_map>
-#include <string>
 #include <mutex>
 #include <vector>
 #include <chrono>
@@ -20,7 +19,6 @@
 #include <unordered_set>
 #include <fstream>
 #include <openssl/evp.h> 
-#include <iomanip>
 #include <sstream>
 #include <deque>
 #include <condition_variable> 
@@ -305,9 +303,6 @@ if (command == "GET" && tokens.size() == 2) {
     return "$-1\r\n";
 }
 
-
-
-
     // ---------- INCR ----------
     if (command == "INCR" && tokens.size() == 2) {
         std::lock_guard<std::mutex> lock(store_mutex);
@@ -496,8 +491,6 @@ std::pair<double, double> decode_geohash(uint64_t hash) {
     return {lon, lat};
 }
 
-
-
 double calculate_haversine(double lon1, double lat1, double lon2, double lat2) {
     const double EARTH_RADIUS_METERS = 6372797.560856;
     
@@ -517,8 +510,6 @@ double calculate_haversine(double lon1, double lat1, double lon2, double lat2) {
     
     return EARTH_RADIUS_METERS * c;
 }
-
-
 
 void handle_client(int client_fd) {
 
@@ -557,9 +548,7 @@ void handle_client(int client_fd) {
         // Normalize command to uppercase
         for (auto& c : command) c = toupper(c);
 
-        
-
-        // After parsing the command, check if we're in a transaction
+ // After parsing the command, check if we're in a transaction
 // Transaction queuing (CLIENTS ONLY, not replication)
 if (client_fd != master_fd &&
     in_transaction[client_fd] &&
@@ -572,7 +561,6 @@ if (client_fd != master_fd &&
     send(client_fd, response, strlen(response), 0);
     continue;
 }
-
 
 // ... after parsing tokens and command normalization ...
 for (auto& c : command) c = toupper(c);
@@ -643,10 +631,6 @@ if (!is_authenticated) {
     continue; // Stop here and wait for next command
 }
 
-// ... rest of your command handlers (PING, ECHO, SET, etc.) follow here ...
-
-// Now your normal command handling continues...
-
         // ---------- PING ----------
       
 if (command == "PING") {
@@ -683,61 +667,6 @@ if (command == "PING") {
             send(client_fd, response.c_str(), response.size(), 0);
         }
 
-        // ---------- SET ----------
-//         else if (command == "SET" && (tokens.size() == 3 || tokens.size() == 5)) {
-//     std::lock_guard<std::mutex> lock(store_mutex);
-
-//     Value val;
-//     val.data = tokens[2];
-//     val.has_expiry = false;
-
-//     if (tokens.size() == 5) {
-//         std::string option = tokens[3];
-//         for (auto& c : option) c = toupper(c);
-
-//         if (option == "PX") {
-//             int ttl_ms = std::stoi(tokens[4]);
-//             val.expiry = std::chrono::steady_clock::now()
-//                        + std::chrono::milliseconds(ttl_ms);
-//             val.has_expiry = true;
-//         }
-//     }
-
-//     store[tokens[1]] = val;
-
-//     const char* ok = "+OK\r\n";
-//     send(client_fd, ok, strlen(ok), 0);
-// }
-
-
-        // ---------- GET ----------
-//        else if (command == "GET" && tokens.size() == 2) {
-//     std::lock_guard<std::mutex> lock(store_mutex);
-
-//     auto it = store.find(tokens[1]);
-//     if (it == store.end()) {
-//         const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
-//         send(client_fd, nil, strlen(nil), 0);
-//         continue;
-//     }
-
-//     Value& val = it->second;
-
-//     if (val.has_expiry &&
-//         std::chrono::steady_clock::now() > val.expiry) {
-//         store.erase(it);
-//         const char* nil = "$-1\r\n";  // ✅ Changed from *0\r\n
-//         send(client_fd, nil, strlen(nil), 0);
-//         continue;
-//     }
-
-//     std::string response =
-//         "$" + std::to_string(val.data.size()) + "\r\n" +
-//         val.data + "\r\n";
-
-//     send(client_fd, response.c_str(), response.size(), 0);
-// }
-
 // -------- TYPE COMMAND LOGIC --------------
 
 else if (command == "TYPE" && tokens.size() == 2) {
@@ -772,7 +701,6 @@ else if (command == "TYPE" && tokens.size() == 2) {
     const char* none = "+none\r\n";
     send(client_fd, none, strlen(none), 0);
 }
-
 
 // ------------- XADD ----------
 else if (command == "XADD" && tokens.size() >= 5) {
@@ -955,7 +883,6 @@ else if (command == "XRANGE" && tokens.size() == 4) {
 
     send(client_fd, response.c_str(), response.size(), 0);
 }
-
 
 // --------- XREAD -----------
 else if (command == "XREAD" && tokens.size() >= 4) {
@@ -1159,9 +1086,6 @@ else if (
     }
 }
 
-
-
-
 // ---------- MULTI ----------
 else if (command == "MULTI") {
     std::lock_guard<std::mutex> lock(store_mutex);
@@ -1247,10 +1171,6 @@ else if (command == "INFO" && tokens.size() == 2) {
     }
 }
 
-// In handle_client() function, add these with your other command handlers:
-
-// ---------- REPLCONF ----------
-// When handling a replica connection that sends REPLCONF ACK
 // ---------- REPLCONF ----------
 else if (command == "REPLCONF") {
     std::string subcmd = tokens[1];
@@ -1272,7 +1192,6 @@ else if (command == "REPLCONF") {
     continue;
 }
 
-// ---------- PSYNC ----------
 // ---------- PSYNC ----------
 else if (command == "PSYNC") {
     // Send FULLRESYNC response
@@ -1305,9 +1224,7 @@ else if (command == "PSYNC") {
 replica_connections.insert(client_fd);
 continue;
 
-
 }
-
 
 // ---------- WAIT ----------
 else if (command == "WAIT" && tokens.size() == 3) {
@@ -1324,7 +1241,6 @@ if (master_repl_offset == 0) {
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
-
 
     int numreplicas = std::stoi(tokens[1]);
     int timeout_ms = std::stoi(tokens[2]);
@@ -1410,7 +1326,6 @@ else if (command == "CONFIG" && tokens.size() == 3) {
     send(client_fd, response.c_str(), response.size(), 0);
 }
 
-
 else if (command == "KEYS" && tokens.size() == 2) {
     if (tokens[1] != "*") {
         const char* empty = "*0\r\n";
@@ -1446,12 +1361,8 @@ else if (command == "SUBSCRIBE" && tokens.size() >= 2) {
         
         send(client_fd, response.c_str(), response.size(), 0);
     }
-    
-    // Note: In a full Redis implementation, once a client is subscribed, 
-    // it can only send SUBSCRIBE, UNSUBSCRIBE, PING, or RESET. 
-    // For this stage, simply sending the response is enough to pass.
-}
 
+}
 
 // ---------- PUBLISH ----------
 else if (command == "PUBLISH" && tokens.size() == 3) {
@@ -1485,9 +1396,7 @@ else if (command == "PUBLISH" && tokens.size() == 3) {
 // ---------- UNSUBSCRIBE ----------
 else if (command == "UNSUBSCRIBE") {
     std::lock_guard<std::mutex> lock(sub_mutex);
-    
-    // If no channels are specified, Redis typically unsubscribes from ALL.
-    // However, for this stage, the tester sends specific channels.
+   
     if (tokens.size() == 1) {
         // Handle unsubscription from all channels for this client
         std::vector<std::string> current_subs(client_subscriptions[client_fd].begin(), 
@@ -1682,9 +1591,6 @@ else if (command == "ZCARD" && tokens.size() == 2) {
     if (it != sorted_sets.end()) {
         count = (int)it->second.size();
     }
-
-    // Return the count as a RESP Integer (:count\r\n)
-    // If key wasn't found, count remains 0, which is the correct Redis behavior
     std::string response = ":" + std::to_string(count) + "\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
@@ -1723,8 +1629,7 @@ else if (command == "ZSCORE" && tokens.size() == 3) {
     }
 
     if (found) {
-        // Use ostringstream to handle high precision (up to 17 digits)
-        // %g-like behavior: it will use the shortest representation
+      
         std::ostringstream oss;
         oss << std::setprecision(17) << score; 
         std::string s_val = oss.str();
@@ -1775,8 +1680,6 @@ else if (command == "ZREM" && tokens.size() >= 3) {
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
-
-// ---------- GEOADD ----------
 // ---------- GEOADD ----------
 else if (command == "GEOADD" && tokens.size() >= 5) {
     std::lock_guard<std::mutex> lock(zset_mutex);
@@ -1837,8 +1740,6 @@ else if (command == "GEOADD" && tokens.size() >= 5) {
     }
     continue;
 }
-
-
 
 // ---------- GEOPOS ----------
 
@@ -1993,7 +1894,6 @@ else if (command == "GEOSEARCH" && tokens.size() >= 7) {
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
-
 
 // ---------- ACL ----------
 else if (command == "ACL" && tokens.size() >= 2) {
@@ -2208,8 +2108,6 @@ else if (command == "LPUSH" && tokens.size() >= 3) {
     continue;
 }
 
-
-
 // ---------- LLEN ----------
 else if (command == "LLEN" && tokens.size() >= 2) {
     std::lock_guard<std::mutex> lock(list_mutex);
@@ -2359,8 +2257,6 @@ else if (command == "BLPOP" && tokens.size() >= 3) {
         close(client_fd);
     }
 }
-
-    
 }
 
 void send_replica_handshake(int replica_port) {
@@ -2657,7 +2553,7 @@ while (true) {
             master_port = std::stoi(master_info.substr(space_pos + 1));
         }
     }
-    // 🔴 ADD THESE TWO ELSE-IFS
+  
     else if (arg == "--dir" && i + 1 < argc) {
         config_dir = argv[++i];
     }
