@@ -1,4 +1,3 @@
-#include <openssl/sha.h>
 #include <iomanip>
 #include <iostream>
 #include <cstdlib>
@@ -20,7 +19,27 @@
 #include <map> 
 #include <unordered_set>
 #include <fstream>
+#include <openssl/evp.h> 
+#include <iomanip>
+#include <sstream>
 
+std::string sha256(const std::string& str) {
+    EVP_MD_CTX* context = EVP_MD_CTX_new();
+    const EVP_MD* md = EVP_sha256();
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int lengthOfHash = 0;
+
+    EVP_DigestInit_ex(context, md, nullptr);
+    EVP_DigestUpdate(context, str.c_str(), str.size());
+    EVP_DigestFinal_ex(context, hash, &lengthOfHash);
+    EVP_MD_CTX_free(context);
+
+    std::stringstream ss;
+    for(unsigned int i = 0; i < lengthOfHash; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
 
 struct User {
     std::string username;
@@ -34,19 +53,7 @@ std::unordered_map<std::string, User> users = {
 };
 std::mutex user_mutex;
 
-std::string sha256(const std::string& str) {
-    unsigned char hash[SHA256_DIGEST_LENGTH];
-    SHA256_CTX sha256;
-    SHA256_Init(&sha256);
-    SHA256_Update(&sha256, str.c_str(), str.size());
-    SHA256_Final(hash, &sha256);
 
-    std::stringstream ss;
-    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
-        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
-    }
-    return ss.str();
-}
 
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
@@ -1970,6 +1977,49 @@ else if (command == "ACL" && tokens.size() >= 2) {
             }
             send(client_fd, response.c_str(), (int)response.size(), 0);
         }
+    }
+    continue;
+}
+
+// ---------- AUTH ----------
+else if (command == "AUTH" && tokens.size() >= 3) {
+    std::lock_guard<std::mutex> lock(user_mutex);
+    
+    std::string username = tokens[1];
+    std::string password = tokens[2];
+
+    // 1. Check if user exists
+    auto it = users.find(username);
+    if (it == users.end()) {
+        const char* err = "-WRONGPASS invalid username-password pair or user is disabled\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    auto& user = it->second;
+
+    // 2. Check if the user is 'nopass'
+    if (user.nopass) {
+        send(client_fd, "+OK\r\n", 5, 0);
+        continue;
+    }
+
+    // 3. Hash the provided password and compare with stored hashes
+    std::string provided_hash = sha256(password);
+    bool authenticated = false;
+
+    for (const auto& stored_hash : user.passwords) {
+        if (provided_hash == stored_hash) {
+            authenticated = true;
+            break;
+        }
+    }
+
+    if (authenticated) {
+        send(client_fd, "+OK\r\n", 5, 0);
+    } else {
+        const char* err = "-WRONGPASS invalid username-password pair or user is disabled\r\n";
+        send(client_fd, err, strlen(err), 0);
     }
     continue;
 }
