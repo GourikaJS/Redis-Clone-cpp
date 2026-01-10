@@ -1509,6 +1509,52 @@ else if (command == "ZCARD" && tokens.size() == 2) {
     continue;
 }
 
+// ---------- ZSCORE ----------
+else if (command == "ZSCORE" && tokens.size() == 3) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    std::string member = tokens[2];
+
+    // 1. Check if the sorted set key exists
+    auto it = sorted_sets.find(key);
+    if (it == sorted_sets.end()) {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
+
+    auto& zset = it->second;
+    bool found = false;
+    double score = 0.0;
+
+    // 2. Search for the member in the vector
+    for (const auto& entry : zset) {
+        if (entry.member == member) {
+            score = entry.score;
+            found = true;
+            break;
+        }
+    }
+
+    // 3. Return score as Bulk String or Nil if not found
+    if (found) {
+        // Convert double to string. 
+        // Note: Using std::to_string can add trailing zeros (e.g., 30.100000).
+        // For Redis compatibility, we trim unnecessary zeros or use a stream.
+        std::string s_val = std::to_string(score);
+        s_val.erase(s_val.find_last_not_of('0') + 1, std::string::npos);
+        if (s_val.back() == '.') s_val.pop_back();
+
+        std::string response = "$" + std::to_string(s_val.size()) + "\r\n" + s_val + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    } else {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+    }
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
