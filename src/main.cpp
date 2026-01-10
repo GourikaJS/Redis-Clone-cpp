@@ -1557,6 +1557,44 @@ else if (command == "ZSCORE" && tokens.size() == 3) {
     continue;
 }
 
+// ---------- ZREM ----------
+else if (command == "ZREM" && tokens.size() >= 3) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    int removed_count = 0;
+
+    // Check if the key exists
+    auto it = sorted_sets.find(key);
+    if (it != sorted_sets.end()) {
+        auto& zset = it->second;
+
+        // ZREM can handle multiple members: ZREM key member1 [member2...]
+        for (size_t i = 2; i < tokens.size(); ++i) {
+            std::string member_to_remove = tokens[i];
+            
+            // Search and erase the member
+            for (auto member_it = zset.begin(); member_it != zset.end(); ++member_it) {
+                if (member_it->member == member_to_remove) {
+                    zset.erase(member_it);
+                    removed_count++;
+                    break; // Move to the next member in the tokens list
+                }
+            }
+        }
+        
+        // If the set becomes empty after removal, Redis typically deletes the key
+        if (zset.empty()) {
+            sorted_sets.erase(it);
+        }
+    }
+
+    // Return the number of members removed as a RESP Integer
+    std::string response = ":" + std::to_string(removed_count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
