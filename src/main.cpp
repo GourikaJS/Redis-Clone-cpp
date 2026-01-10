@@ -1,3 +1,5 @@
+#include <openssl/sha.h>
+#include <iomanip>
 #include <iostream>
 #include <cstdlib>
 #include <string>
@@ -20,7 +22,31 @@
 #include <fstream>
 
 
+struct User {
+    std::string username;
+    bool nopass = true;
+    std::vector<std::string> passwords;
+};
 
+// Global user store
+std::unordered_map<std::string, User> users = {
+    {"default", {"default", true, {}}}
+};
+std::mutex user_mutex;
+
+std::string sha256(const std::string& str) {
+    unsigned char hash[SHA256_DIGEST_LENGTH];
+    SHA256_CTX sha256;
+    SHA256_Init(&sha256);
+    SHA256_Update(&sha256, str.c_str(), str.size());
+    SHA256_Final(hash, &sha256);
+
+    std::stringstream ss;
+    for(int i = 0; i < SHA256_DIGEST_LENGTH; i++) {
+        ss << std::hex << std::setw(2) << std::setfill('0') << (int)hash[i];
+    }
+    return ss.str();
+}
 
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
@@ -1890,34 +1916,59 @@ else if (command == "GEOSEARCH" && tokens.size() >= 7) {
 
 // ---------- ACL ----------
 
+// ---------- ACL ----------
 else if (command == "ACL" && tokens.size() >= 2) {
+    std::lock_guard<std::mutex> lock(user_mutex);
     std::string sub_command = tokens[1];
     std::transform(sub_command.begin(), sub_command.end(), sub_command.begin(), ::toupper);
 
+    // --- ACL WHOAMI ---
     if (sub_command == "WHOAMI") {
         const char* response = "$7\r\ndefault\r\n";
-        send(client_fd, response, strlen(response), 0);
+        send(client_fd, response, (int)strlen(response), 0);
     } 
+    
+    // --- ACL SETUSER ---
+    else if (sub_command == "SETUSER" && tokens.size() >= 3) {
+        std::string username = tokens[2];
+        auto& user = users[username]; // Creates user if doesn't exist
+        user.username = username;
+
+        for (size_t i = 3; i < tokens.size(); ++i) {
+            std::string rule = tokens[i];
+            if (rule.size() > 1 && rule[0] == '>') {
+                // Rule: Set password
+                std::string password = rule.substr(1);
+                user.passwords.push_back(sha256(password));
+                user.nopass = false; // Automatically remove nopass
+            }
+        }
+        send(client_fd, "+OK\r\n", 5, 0);
+    }
+
+    // --- ACL GETUSER ---
     else if (sub_command == "GETUSER" && tokens.size() >= 3) {
         std::string username = tokens[2];
-        
-        if (username == "default") {
-            /* Structure: ["flags", ["nopass"], "passwords", []]
-               
-               RESP Breakdown:
-               *4\r\n                   <- Main Array (4 elements)
-               $5\r\nflags\r\n           <- Key 1: "flags"
-               *1\r\n                   <- Value 1: Array with 1 element
-               $6\r\nnopass\r\n          <- Flag: "nopass"
-               $9\r\npasswords\r\n       <- Key 2: "passwords"
-               *0\r\n                   <- Value 2: Empty Array
-            */
-            const char* response = "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n";
-            send(client_fd, response, (int)strlen(response), 0);
+        if (users.find(username) == users.end()) {
+            send(client_fd, "$-1\r\n", 5, 0);
         } else {
-            // User not found
-            const char* nil = "$-1\r\n";
-            send(client_fd, nil, strlen(nil), 0);
+            auto& user = users[username];
+            std::string response = "*4\r\n$5\r\nflags\r\n";
+            
+            // Flags Array
+            if (user.nopass) {
+                response += "*1\r\n$6\r\nnopass\r\n";
+            } else {
+                response += "*0\r\n";
+            }
+
+            // Passwords Array
+            response += "$9\r\npasswords\r\n";
+            response += "*" + std::to_string(user.passwords.size()) + "\r\n";
+            for (const auto& hash : user.passwords) {
+                response += "$" + std::to_string(hash.size()) + "\r\n" + hash + "\r\n";
+            }
+            send(client_fd, response.c_str(), (int)response.size(), 0);
         }
     }
     continue;
