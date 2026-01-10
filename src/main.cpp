@@ -1251,6 +1251,29 @@ else if (command == "SUBSCRIBE" && tokens.size() >= 2) {
 }
 
 
+// ---------- PUBLISH ----------
+else if (command == "PUBLISH" && tokens.size() == 3) {
+    std::string channel = tokens[1];
+    std::string message = tokens[2];
+    int subscriber_count = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(sub_mutex);
+        // Count how many clients are subscribed to this specific channel
+        for (auto const& [fd, subs] : client_subscriptions) {
+            if (subs.find(channel) != subs.end()) {
+                subscriber_count++;
+            }
+        }
+    }
+
+    // In this stage, we only respond with the count.
+    // We don't deliver the message to the subscribers yet.
+    std::string response = ":" + std::to_string(subscriber_count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
