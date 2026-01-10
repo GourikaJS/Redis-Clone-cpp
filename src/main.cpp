@@ -195,10 +195,13 @@ std::string execute_command_and_capture(
     const std::string& key = tokens[1];
 
     // 🔴 RDB-loaded value has priority
-    if (!rdb_keys.empty() && rdb_keys[0] == key) {
-        return "$" + std::to_string(rdb_value.size()) + "\r\n" +
-               rdb_value + "\r\n";
-    }
+    auto it = rdb_kv.find(key);
+if (it != rdb_kv.end()) {
+    const std::string& value = it->second;
+    return "$" + std::to_string(value.size()) + "\r\n" +
+           value + "\r\n";
+}
+
 
     // Existing in-memory logic
     std::lock_guard<std::mutex> lock(store_mutex);
@@ -316,7 +319,7 @@ std::string value(reinterpret_cast<char*>(&buf[i]), val_len);
 i += val_len;
 
 rdb_keys.push_back(key);
-rdb_value = value;
+
 
 continue; // single key only
 
