@@ -1597,17 +1597,44 @@ else if (command == "ZREM" && tokens.size() >= 3) {
 
 // ---------- GEOADD ----------
 else if (command == "GEOADD" && tokens.size() >= 5) {
-    // In this stage, we only need to implement the response.
-    // Storing and Geohashing will come in later stages.
+    int added_count = 0;
     
-    // Calculate how many members were provided. 
-    // Format: GEOADD key long lat member [long lat member...]
-    // (tokens.size() - 2) / 3 gives the number of member triplets
-    int added_count = (tokens.size() - 2) / 3;
+    // Process triplets: longitude, latitude, member
+    for (size_t i = 2; i + 2 < tokens.size(); i += 3) {
+        try {
+            double lon = std::stod(tokens[i]);
+            double lat = std::stod(tokens[i+1]);
+            // std::string member = tokens[i+2]; // Not used for storage yet
 
-    // Construct the RESP Integer response: :count\r\n
-    std::string response = ":" + std::to_string(added_count) + "\r\n";
-    send(client_fd, response.c_str(), response.size(), 0);
+            // 1. Validate Longitude: [-180, 180]
+            if (lon < -180.0 || lon > 180.0) {
+                std::string err = "-ERR invalid longitude " + tokens[i] + "\r\n";
+                send(client_fd, err.c_str(), err.size(), 0);
+                goto geoadd_done;
+            }
+
+            // 2. Validate Latitude: [-85.05112878, 85.05112878]
+            if (lat < -85.05112878 || lat > 85.05112878) {
+                std::string err = "-ERR invalid latitude " + tokens[i+1] + "\r\n";
+                send(client_fd, err.c_str(), err.size(), 0);
+                goto geoadd_done;
+            }
+
+            added_count++;
+        } catch (...) {
+            const char* err = "-ERR value is not a valid float\r\n";
+            send(client_fd, err.c_str(), strlen(err), 0);
+            goto geoadd_done;
+        }
+    }
+
+    // If all validations pass, send the count
+    {
+        std::string response = ":" + std::to_string(added_count) + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    }
+
+    geoadd_done:
     continue;
 }
 
