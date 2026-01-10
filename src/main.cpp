@@ -2098,19 +2098,30 @@ else if (command == "AUTH" && tokens.size() >= 3) {
 
 // ---------- RPUSH ----------
 else if (command == "RPUSH" && tokens.size() >= 3) {
-    std::lock_guard<std::mutex> lock(list_mutex);
-    
     std::string key = tokens[1];
-    
-    // In this stage, we handle one or more elements
-    for (size_t i = 2; i < tokens.size(); ++i) {
-        redis_lists[key].push_back(tokens[i]);
+    int list_size = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(list_mutex);
+        
+        // Append elements
+        for (size_t i = 2; i < tokens.size(); ++i) {
+            redis_lists[key].push_back(tokens[i]);
+        }
+        list_size = redis_lists[key].size();
+
+        // Notify BLPOP clients
+        {
+            std::lock_guard<std::mutex> b_lock(blocking_mutex);
+            if (blocked_clients.count(key) && !blocked_clients[key].empty()) {
+                auto client = blocked_clients[key].front();
+                blocked_clients[key].pop_front();
+                client->cv.notify_one(); 
+            }
+        }
     }
 
-    // Return the number of elements in the list
-    int list_size = redis_lists[key].size();
     std::string response = ":" + std::to_string(list_size) + "\r\n";
-    
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
@@ -2198,37 +2209,6 @@ else if (command == "LPUSH" && tokens.size() >= 3) {
 }
 
 
-// ---------- RPUSH (Fixed for BLPOP) ----------
-else if (command == "RPUSH" && tokens.size() >= 3) {
-    std::string key = tokens[1];
-    int list_size = 0;
-    std::shared_ptr<BlockedClient> target_client = nullptr;
-
-    {
-        std::lock_guard<std::mutex> lock(list_mutex);
-        for (size_t i = 2; i < tokens.size(); ++i) {
-            redis_lists[key].push_back(tokens[i]);
-        }
-        list_size = redis_lists[key].size();
-
-        // Check if anyone is waiting
-        std::lock_guard<std::mutex> b_lock(blocking_mutex);
-        if (blocked_clients.count(key) && !blocked_clients[key].empty()) {
-            target_client = blocked_clients[key].front();
-            blocked_clients[key].pop_front();
-        }
-    }
-
-    // Notify OUTSIDE the list_mutex to prevent the woken thread 
-    // from immediately hitting a locked mutex
-    if (target_client) {
-        target_client->cv.notify_one();
-    }
-
-    std::string response = ":" + std::to_string(list_size) + "\r\n";
-    send(client_fd, response.c_str(), response.size(), 0);
-    continue;
-}
 
 // ---------- LLEN ----------
 else if (command == "LLEN" && tokens.size() >= 2) {
