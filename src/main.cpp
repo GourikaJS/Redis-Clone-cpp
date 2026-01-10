@@ -1432,6 +1432,51 @@ else if (command == "ZRANK" && tokens.size() == 3) {
     continue;
 }
 
+// ---------- ZRANGE ----------
+else if (command == "ZRANGE" && tokens.size() == 4) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    int start = std::stoi(tokens[2]);
+    int stop = std::stoi(tokens[3]);
+
+    // 1. If key doesn't exist, return empty array
+    if (sorted_sets.find(key) == sorted_sets.end()) {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+        continue;
+    }
+
+    auto& zset = sorted_sets[key];
+    int size = (int)zset.size();
+
+    // 2. Validate indices per Redis rules (for non-negative integers in this stage)
+    if (start >= size || start > stop) {
+        const char* empty = "*0\r\n";
+        send(client_fd, empty, strlen(empty), 0);
+        continue;
+    }
+
+    // Adjust stop if it exceeds the last element index
+    if (stop >= size) {
+        stop = size - 1;
+    }
+
+    // 3. Collect the range of members
+    std::vector<std::string> members;
+    for (int i = start; i <= stop; ++i) {
+        members.push_back(zset[i].member);
+    }
+
+    // 4. Construct the RESP Array response
+    std::string response = "*" + std::to_string(members.size()) + "\r\n";
+    for (const auto& m : members) {
+        response += "$" + std::to_string(m.size()) + "\r\n" + m + "\r\n";
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
 
     }
    {
