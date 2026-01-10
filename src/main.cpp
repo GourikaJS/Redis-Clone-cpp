@@ -1595,6 +1595,22 @@ else if (command == "ZREM" && tokens.size() >= 3) {
     continue;
 }
 
+// ---------- GEOADD ----------
+else if (command == "GEOADD" && tokens.size() >= 5) {
+    // In this stage, we only need to implement the response.
+    // Storing and Geohashing will come in later stages.
+    
+    // Calculate how many members were provided. 
+    // Format: GEOADD key long lat member [long lat member...]
+    // (tokens.size() - 2) / 3 gives the number of member triplets
+    int added_count = (tokens.size() - 2) / 3;
+
+    // Construct the RESP Integer response: :count\r\n
+    std::string response = ":" + std::to_string(added_count) + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
