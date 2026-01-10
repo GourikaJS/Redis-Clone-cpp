@@ -419,6 +419,32 @@ uint64_t encode_geohash(double longitude, double latitude) {
 }
 
 
+std::pair<double, double> decode_geohash(uint64_t hash) {
+    double min_lon = -180.0, max_lon = 180.0;
+    double min_lat = -85.05112878, max_lat = 85.05112878;
+
+    for (int i = 0; i < 26; ++i) {
+        // Longitude bit (even bits: 51, 49, 47...)
+        if (hash & (1ULL << (52 - 1 - (i * 2)))) {
+            min_lon = (min_lon + max_lon) / 2.0;
+        } else {
+            max_lon = (min_lon + max_lon) / 2.0;
+        }
+
+        // Latitude bit (odd bits: 50, 48, 46...)
+        if (hash & (1ULL << (52 - 1 - (i * 2 + 1)))) {
+            min_lat = (min_lat + max_lat) / 2.0;
+        } else {
+            max_lat = (min_lat + max_lat) / 2.0;
+        }
+    }
+
+    // Redis returns the center of the final bounding box
+    double lon = (min_lon + max_lon) / 2.0;
+    double lat = (min_lat + max_lat) / 2.0;
+    return {lon, lat};
+}
+
 
 
 void handle_client(int client_fd) {
@@ -1685,27 +1711,24 @@ else if (command == "GEOADD" && tokens.size() >= 5) {
 
 
 // ---------- GEOPOS ----------
+
 else if (command == "GEOPOS" && tokens.size() >= 3) {
     std::lock_guard<std::mutex> lock(zset_mutex);
-    
     std::string key = tokens[1];
     int num_members = tokens.size() - 2;
 
-    // Start building the outer RESP array
     std::string response = "*" + std::to_string(num_members) + "\r\n";
-
-    // Check if the key exists at all
     auto it = sorted_sets.find(key);
-    bool key_exists = (it != sorted_sets.end());
 
     for (int i = 0; i < num_members; ++i) {
         std::string member_name = tokens[i + 2];
         bool member_found = false;
+        double score = 0;
 
-        if (key_exists) {
-            // Search for the member in the sorted set vector
+        if (it != sorted_sets.end()) {
             for (const auto& entry : it->second) {
                 if (entry.member == member_name) {
+                    score = entry.score;
                     member_found = true;
                     break;
                 }
@@ -1713,13 +1736,21 @@ else if (command == "GEOPOS" && tokens.size() >= 3) {
         }
 
         if (member_found) {
-            // Location exists: Return sub-array ["0", "0"]
-            // *2\r\n       <- Sub-array of 2
-            // $1\r\n0\r\n  <- Longitude "0"
-            // $1\r\n0\r\n  <- Latitude "0"
-            response += "*2\r\n$1\r\n0\r\n$1\r\n0\r\n";
+            // Decode the 52-bit hash (stored as double in our SortedSet)
+            auto coords = decode_geohash(static_cast<uint64_t>(score));
+
+            // Format coordinates with high precision
+            std::ostringstream lon_oss, lat_oss;
+            lon_oss << std::setprecision(17) << coords.first;
+            lat_oss << std::setprecision(17) << coords.second;
+            
+            std::string lon_s = lon_oss.str();
+            std::string lat_s = lat_oss.str();
+
+            response += "*2\r\n";
+            response += "$" + std::to_string(lon_s.size()) + "\r\n" + lon_s + "\r\n";
+            response += "$" + std::to_string(lat_s.size()) + "\r\n" + lat_s + "\r\n";
         } else {
-            // Key or member missing: Return Null Array
             response += "*-1\r\n";
         }
     }
@@ -1727,6 +1758,7 @@ else if (command == "GEOPOS" && tokens.size() >= 3) {
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
+
 
     }
    {
