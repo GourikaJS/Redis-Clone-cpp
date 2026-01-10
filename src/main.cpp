@@ -2175,6 +2175,27 @@ else if (command == "LPUSH" && tokens.size() >= 3) {
     continue;
 }
 
+// ---------- LLEN ----------
+else if (command == "LLEN" && tokens.size() >= 2) {
+    std::lock_guard<std::mutex> lock(list_mutex);
+    
+    std::string key = tokens[1];
+    int length = 0;
+
+    // 1. Check if the list exists in our storage
+    auto it = redis_lists.find(key);
+    if (it != redis_lists.end()) {
+        // 2. Get the actual size of the deque
+        length = static_cast<int>(it->second.size());
+    }
+
+    // 3. Encode the length as a RESP Integer (:length\r\n)
+    std::string response = ":" + std::to_string(length) + "\r\n";
+    
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
