@@ -191,34 +191,36 @@ std::string execute_command_and_capture(
     }
 
 // ---------- GET ----------
-// ---------- GET ----------
 if (command == "GET" && tokens.size() == 2) {
-    const std::string& key = tokens[1];
+    std::string key = tokens[1];
 
     // 1️⃣ Check in-memory store first
-    {
-        std::lock_guard<std::mutex> lock(store_mutex);
-        auto it = store.find(key);
-        if (it != store.end()) {
-            Value& val = it->second;
-            if (!val.has_expiry ||
-                std::chrono::steady_clock::now() <= val.expiry) {
-                return "$" + std::to_string(val.data.size()) + "\r\n" +
-                       val.data + "\r\n";
-            }
+    auto it = store.find(key);
+    if (it != store.end()) {
+        Value& val = it->second;
+
+        if (val.has_expiry &&
+            std::chrono::steady_clock::now() > val.expiry) {
+            store.erase(it);
+            return "$-1\r\n";
         }
+
+        return "$" + std::to_string(val.data.size()) + "\r\n" +
+               val.data + "\r\n";
     }
 
-    // 2️⃣ Check RDB-loaded data
+    // 2️⃣ FALLBACK to RDB-loaded data
     auto rit = rdb_kv.find(key);
     if (rit != rdb_kv.end()) {
-        return "$" + std::to_string(rit->second.size()) + "\r\n" +
-               rit->second + "\r\n";
+        const std::string& v = rit->second;
+        return "$" + std::to_string(v.size()) + "\r\n" +
+               v + "\r\n";
     }
 
-    // 3️⃣ Not found
+    // 3️⃣ Not found anywhere
     return "$-1\r\n";
 }
+
 
 
 
