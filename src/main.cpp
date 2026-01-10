@@ -1433,6 +1433,7 @@ else if (command == "ZRANK" && tokens.size() == 3) {
 }
 
 // ---------- ZRANGE ----------
+
 else if (command == "ZRANGE" && tokens.size() == 4) {
     std::lock_guard<std::mutex> lock(zset_mutex);
     
@@ -1440,7 +1441,6 @@ else if (command == "ZRANGE" && tokens.size() == 4) {
     int start = std::stoi(tokens[2]);
     int stop = std::stoi(tokens[3]);
 
-    // 1. If key doesn't exist, return empty array
     if (sorted_sets.find(key) == sorted_sets.end()) {
         const char* empty = "*0\r\n";
         send(client_fd, empty, strlen(empty), 0);
@@ -1450,25 +1450,36 @@ else if (command == "ZRANGE" && tokens.size() == 4) {
     auto& zset = sorted_sets[key];
     int size = (int)zset.size();
 
-    // 2. Validate indices per Redis rules (for non-negative integers in this stage)
+    // --- Normalize Negative Indices ---
+    // If index < 0, it's relative to the end. If it's still < 0 after addition, it becomes 0.
+    if (start < 0) {
+        start = size + start;
+        if (start < 0) start = 0;
+    }
+    if (stop < 0) {
+        stop = size + stop;
+        if (stop < 0) stop = 0;
+    }
+
+    // --- Boundaries & Edge Cases ---
+    // 1. If stop is beyond the size, treat as last element
+    if (stop >= size) {
+        stop = size - 1;
+    }
+
+    // 2. If start is still out of range or greater than stop, return empty array
     if (start >= size || start > stop) {
         const char* empty = "*0\r\n";
         send(client_fd, empty, strlen(empty), 0);
         continue;
     }
 
-    // Adjust stop if it exceeds the last element index
-    if (stop >= size) {
-        stop = size - 1;
-    }
-
-    // 3. Collect the range of members
+    // --- Build Response ---
     std::vector<std::string> members;
     for (int i = start; i <= stop; ++i) {
         members.push_back(zset[i].member);
     }
 
-    // 4. Construct the RESP Array response
     std::string response = "*" + std::to_string(members.size()) + "\r\n";
     for (const auto& m : members) {
         response += "$" + std::to_string(m.size()) + "\r\n" + m + "\r\n";
