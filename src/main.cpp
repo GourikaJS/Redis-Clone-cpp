@@ -504,6 +504,18 @@ double calculate_haversine(double lon1, double lat1, double lon2, double lat2) {
 
 
 void handle_client(int client_fd) {
+
+    // Each connection starts with its own authentication state
+    bool is_authenticated = false;
+    
+    // Check if the 'default' user allows automatic login (has nopass)
+    {
+        std::lock_guard<std::mutex> lock(user_mutex);
+        if (users["default"].nopass) {
+            is_authenticated = true;
+        }
+    }
+
     char buffer[1024];
 
     while (true) {
@@ -567,6 +579,51 @@ if (is_subscribed_mode && allowed_in_sub.find(command) == allowed_in_sub.end()) 
     std::string err_msg = "-ERR Can't execute '" + tokens[0] + "': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context\r\n";
     send(client_fd, err_msg.c_str(), err_msg.size(), 0);
     continue; // Skip the rest of the command handling for this input
+}
+
+// 1. First, handle the AUTH command specifically so it's NOT blocked
+if (command == "AUTH") {
+    if (tokens.size() < 3) {
+        const char* err = "-ERR wrong number of arguments for 'auth' command\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    std::lock_guard<std::mutex> lock(user_mutex);
+    std::string username = tokens[1];
+    std::string password = tokens[2];
+
+    auto it = users.find(username);
+    if (it == users.end()) {
+        const char* err = "-WRONGPASS invalid username-password pair or user is disabled\r\n";
+        send(client_fd, err, strlen(err), 0);
+        continue;
+    }
+
+    std::string provided_hash = sha256(password);
+    bool authenticated = false;
+    for (const auto& stored_hash : it->second.passwords) {
+        if (provided_hash == stored_hash) {
+            authenticated = true;
+            break;
+        }
+    }
+
+    if (authenticated || it->second.nopass) {
+        is_authenticated = true; // Update this connection's state
+        send(client_fd, "+OK\r\n", 5, 0);
+    } else {
+        const char* err = "-WRONGPASS invalid username-password pair or user is disabled\r\n";
+        send(client_fd, err, strlen(err), 0);
+    }
+    continue;
+}
+
+// 2. Now check if the client is authenticated for ANY other command
+if (!is_authenticated) {
+    const char* noauth_err = "-NOAUTH Authentication required.\r\n";
+    send(client_fd, noauth_err, strlen(noauth_err), 0);
+    continue; // Stop here and wait for next command
 }
 
 // ... rest of your command handlers (PING, ECHO, SET, etc.) follow here ...
