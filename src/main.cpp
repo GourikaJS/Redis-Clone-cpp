@@ -2196,6 +2196,38 @@ else if (command == "LLEN" && tokens.size() >= 2) {
     continue;
 }
 
+// ---------- LPOP ----------
+else if (command == "LPOP" && tokens.size() >= 2) {
+    std::lock_guard<std::mutex> lock(list_mutex);
+    
+    std::string key = tokens[1];
+
+    // 1. Check if the list exists
+    auto it = redis_lists.find(key);
+    if (it == redis_lists.end() || it->second.empty()) {
+        // Return Null Bulk String if key doesn't exist or list is empty
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
+
+    // 2. Retrieve the first element
+    std::string first_element = it->second.front();
+
+    // 3. Remove the first element from the deque
+    it->second.pop_front();
+
+    // 4. If the list is now empty, optionally delete the key (Redis behavior)
+    if (it->second.empty()) {
+        redis_lists.erase(it);
+    }
+
+    // 5. Encode and send as a RESP Bulk String
+    std::string response = "$" + std::to_string(first_element.size()) + "\r\n" + first_element + "\r\n";
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
