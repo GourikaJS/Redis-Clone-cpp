@@ -391,7 +391,32 @@ void load_rdb_file() {
     }
 }
 
+uint64_t encode_geohash(double longitude, double latitude) {
+    double min_lon = -180.0, max_lon = 180.0;
+    double min_lat = -85.05112878, max_lat = 85.05112878;
+    uint64_t hash = 0;
 
+    for (int i = 0; i < 26; ++i) {
+        // Longitude bit (even bits)
+        double mid_lon = (min_lon + max_lon) / 2.0;
+        if (longitude >= mid_lon) {
+            hash |= (1ULL << (52 - 1 - (i * 2)));
+            min_lon = mid_lon;
+        } else {
+            max_lon = mid_lon;
+        }
+
+        // Latitude bit (odd bits)
+        double mid_lat = (min_lat + max_lat) / 2.0;
+        if (latitude >= mid_lat) {
+            hash |= (1ULL << (52 - 1 - (i * 2 + 1)));
+            min_lat = mid_lat;
+        } else {
+            max_lat = mid_lat;
+        }
+    }
+    return hash;
+}
 
 
 
