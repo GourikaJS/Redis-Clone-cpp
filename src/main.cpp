@@ -23,6 +23,10 @@
 #include <iomanip>
 #include <sstream>
 
+// --- Global storage for Redis Lists ---
+std::unordered_map<std::string, std::deque<std::string>> redis_lists;
+std::mutex list_mutex;
+
 std::string sha256(const std::string& str) {
     EVP_MD_CTX* context = EVP_MD_CTX_new();
     const EVP_MD* md = EVP_sha256();
@@ -1979,8 +1983,6 @@ else if (command == "GEOSEARCH" && tokens.size() >= 7) {
 
 
 // ---------- ACL ----------
-
-// ---------- ACL ----------
 else if (command == "ACL" && tokens.size() >= 2) {
     std::lock_guard<std::mutex> lock(user_mutex);
     std::string sub_command = tokens[1];
@@ -2078,6 +2080,25 @@ else if (command == "AUTH" && tokens.size() >= 3) {
         const char* err = "-WRONGPASS invalid username-password pair or user is disabled\r\n";
         send(client_fd, err, strlen(err), 0);
     }
+    continue;
+}
+
+// ---------- RPUSH ----------
+else if (command == "RPUSH" && tokens.size() >= 3) {
+    std::lock_guard<std::mutex> lock(list_mutex);
+    
+    std::string key = tokens[1];
+    
+    // In this stage, we handle one or more elements
+    for (size_t i = 2; i < tokens.size(); ++i) {
+        redis_lists[key].push_back(tokens[i]);
+    }
+
+    // Return the number of elements in the list
+    int list_size = redis_lists[key].size();
+    std::string response = ":" + std::to_string(list_size) + "\r\n";
+    
+    send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
 
