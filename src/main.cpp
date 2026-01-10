@@ -1902,17 +1902,20 @@ else if (command == "ACL" && tokens.size() >= 2) {
         std::string username = tokens[2];
         
         if (username == "default") {
-            /* Structure: ["flags", ["nopass"]]
+            /* Structure: ["flags", ["nopass"], "passwords", []]
                
                RESP Breakdown:
-               *2\r\n                <- Main Array (2 elements: Key and Value)
-               $5\r\nflags\r\n        <- Key: Bulk String "flags"
-               *1\r\n                <- Value: Nested Array (1 element)
-               $6\r\nnopass\r\n       <- Flag: Bulk String "nopass"
+               *4\r\n                   <- Main Array (4 elements)
+               $5\r\nflags\r\n           <- Key 1: "flags"
+               *1\r\n                   <- Value 1: Array with 1 element
+               $6\r\nnopass\r\n          <- Flag: "nopass"
+               $9\r\npasswords\r\n       <- Key 2: "passwords"
+               *0\r\n                   <- Value 2: Empty Array
             */
-            const char* response = "*2\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n";
-            send(client_fd, response, strlen(response), 0);
+            const char* response = "*4\r\n$5\r\nflags\r\n*1\r\n$6\r\nnopass\r\n$9\r\npasswords\r\n*0\r\n";
+            send(client_fd, response, (int)strlen(response), 0);
         } else {
+            // User not found
             const char* nil = "$-1\r\n";
             send(client_fd, nil, strlen(nil), 0);
         }
