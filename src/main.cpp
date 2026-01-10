@@ -2154,6 +2154,27 @@ else if (command == "LRANGE" && tokens.size() >= 4) {
     continue;
 }
 
+
+// ---------- LPUSH ----------
+else if (command == "LPUSH" && tokens.size() >= 3) {
+    std::lock_guard<std::mutex> lock(list_mutex);
+    
+    std::string key = tokens[1];
+    
+    // Elements are prepended one by one.
+    // LPUSH key a b c results in [c, b, a]
+    for (size_t i = 2; i < tokens.size(); ++i) {
+        redis_lists[key].push_front(tokens[i]);
+    }
+
+    // Return the number of elements in the list after the operations
+    int list_size = redis_lists[key].size();
+    std::string response = ":" + std::to_string(list_size) + "\r\n";
+    
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
