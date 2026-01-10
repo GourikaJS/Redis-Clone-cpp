@@ -1596,31 +1596,51 @@ else if (command == "ZREM" && tokens.size() >= 3) {
 }
 
 // ---------- GEOADD ----------
+// ---------- GEOADD ----------
 else if (command == "GEOADD" && tokens.size() >= 5) {
-    int added_count = 0;
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    std::string key = tokens[1];
     
-    // Process triplets: longitude, latitude, member
+    int added_count = 0;
+    bool error_occurred = false; // <--- MAKE SURE THIS LINE IS HERE
+
     for (size_t i = 2; i + 2 < tokens.size(); i += 3) {
         try {
             double lon = std::stod(tokens[i]);
             double lat = std::stod(tokens[i+1]);
-            // std::string member = tokens[i+2]; // Not used for storage yet
+            std::string member = tokens[i+2];
 
-            // 1. Validate Longitude: [-180, 180]
+            // Validation
             if (lon < -180.0 || lon > 180.0) {
-                std::string err = "-ERR invalid longitude " + tokens[i] + "\r\n";
+                std::string err = "-ERR invalid longitude\r\n";
                 send(client_fd, err.c_str(), err.size(), 0);
-                goto geoadd_done;
+                error_occurred = true; 
+                break;
             }
-
-            // 2. Validate Latitude: [-85.05112878, 85.05112878]
             if (lat < -85.05112878 || lat > 85.05112878) {
-                std::string err = "-ERR invalid latitude " + tokens[i+1] + "\r\n";
+                std::string err = "-ERR invalid latitude\r\n";
                 send(client_fd, err.c_str(), err.size(), 0);
-                goto geoadd_done;
+                error_occurred = true; 
+                break;
             }
 
-            added_count++;
+            // Encode and Store
+            uint64_t hash = encode_geohash(lon, lat);
+            auto& zset = sorted_sets[key];
+            bool found = false;
+            for (auto& entry : zset) {
+                if (entry.member == member) {
+                    entry.score = static_cast<double>(hash);
+                    found = true; 
+                    break;
+                }
+            }
+            if (!found) {
+                zset.push_back({member, static_cast<double>(hash)});
+                added_count++;
+            }
+            std::sort(zset.begin(), zset.end());
+
         } catch (...) {
             const char* err = "-ERR value is not a valid float\r\n";
             send(client_fd, err, (int)strlen(err), 0);
@@ -1629,13 +1649,11 @@ else if (command == "GEOADD" && tokens.size() >= 5) {
         }
     }
 
-    // If all validations pass, send the count
-    {
+    // Only send the integer response if no error was sent inside the loop
+    if (!error_occurred) {
         std::string response = ":" + std::to_string(added_count) + "\r\n";
         send(client_fd, response.c_str(), response.size(), 0);
     }
-
-    geoadd_done:
     continue;
 }
 
