@@ -2205,26 +2205,49 @@ else if (command == "LPOP" && tokens.size() >= 2) {
     // 1. Check if the list exists
     auto it = redis_lists.find(key);
     if (it == redis_lists.end() || it->second.empty()) {
-        // Return Null Bulk String if key doesn't exist or list is empty
         const char* nil = "$-1\r\n";
         send(client_fd, nil, strlen(nil), 0);
         continue;
     }
 
-    // 2. Retrieve the first element
-    std::string first_element = it->second.front();
+    auto& list = it->second;
 
-    // 3. Remove the first element from the deque
-    it->second.pop_front();
+    // 2. Determine if a 'count' argument was provided
+    if (tokens.size() >= 3) {
+        int count = std::stoi(tokens[2]);
+        if (count < 0) {
+            const char* err = "-ERR value is out of range, must be positive\r\n";
+            send(client_fd, err, strlen(err), 0);
+            continue;
+        }
 
-    // 4. If the list is now empty, optionally delete the key (Redis behavior)
-    if (it->second.empty()) {
-        redis_lists.erase(it);
+        // 3. Extract up to 'count' elements
+        std::vector<std::string> removed_elements;
+        int to_remove = std::min(count, (int)list.size());
+
+        for (int i = 0; i < to_remove; ++i) {
+            removed_elements.push_back(list.front());
+            list.pop_front();
+        }
+
+        // 4. Cleanup and respond with a RESP Array
+        if (list.empty()) redis_lists.erase(it);
+
+        std::string response = "*" + std::to_string(removed_elements.size()) + "\r\n";
+        for (const auto& elem : removed_elements) {
+            response += "$" + std::to_string(elem.size()) + "\r\n" + elem + "\r\n";
+        }
+        send(client_fd, response.c_str(), response.size(), 0);
+    } 
+    else {
+        // Standard LPOP behavior: Return single Bulk String
+        std::string first_element = list.front();
+        list.pop_front();
+        if (list.empty()) redis_lists.erase(it);
+
+        std::string response = "$" + std::to_string(first_element.size()) + "\r\n" + first_element + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
     }
-
-    // 5. Encode and send as a RESP Bulk String
-    std::string response = "$" + std::to_string(first_element.size()) + "\r\n" + first_element + "\r\n";
-    send(client_fd, response.c_str(), response.size(), 0);
     continue;
 }
 
