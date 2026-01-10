@@ -1623,8 +1623,9 @@ else if (command == "GEOADD" && tokens.size() >= 5) {
             added_count++;
         } catch (...) {
             const char* err = "-ERR value is not a valid float\r\n";
-            send(client_fd, err.c_str(), strlen(err), 0);
-            goto geoadd_done;
+            send(client_fd, err, (int)strlen(err), 0);
+            error_occurred = true; 
+            break;
         }
     }
 
