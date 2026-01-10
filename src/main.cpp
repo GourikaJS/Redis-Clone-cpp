@@ -387,7 +387,12 @@ void handle_client(int client_fd) {
 
     while (true) {
         int bytes_read = read(client_fd, buffer, sizeof(buffer) - 1);
-        if (bytes_read <= 0) break;
+        // if (bytes_read <= 0) break;
+        if (bytes_read <= 0) {
+            std::lock_guard<std::mutex> lock(sub_mutex);
+            client_subscriptions.erase(client_fd); // Cleanup: Stop tracking this client
+            close(client_fd);                      // Close the socket
+            return;
 
         buffer[bytes_read] = '\0';
         std::string input(buffer);
@@ -1252,23 +1257,30 @@ else if (command == "SUBSCRIBE" && tokens.size() >= 2) {
 
 
 // ---------- PUBLISH ----------
+// ---------- PUBLISH ----------
 else if (command == "PUBLISH" && tokens.size() == 3) {
     std::string channel = tokens[1];
     std::string message = tokens[2];
     int subscriber_count = 0;
 
+    // Construct the message to be delivered: ["message", channel, data]
+    std::string delivery = "*3\r\n";
+    delivery += "$7\r\nmessage\r\n";
+    delivery += "$" + std::to_string(channel.size()) + "\r\n" + channel + "\r\n";
+    delivery += "$" + std::to_string(message.size()) + "\r\n" + message + "\r\n";
+
     {
         std::lock_guard<std::mutex> lock(sub_mutex);
-        // Count how many clients are subscribed to this specific channel
         for (auto const& [fd, subs] : client_subscriptions) {
             if (subs.find(channel) != subs.end()) {
                 subscriber_count++;
+                // Send the message to the subscribed client
+                send(fd, delivery.c_str(), delivery.size(), 0);
             }
         }
     }
 
-    // In this stage, we only respond with the count.
-    // We don't deliver the message to the subscribers yet.
+    // Respond to the publisher with the count of subscribers reached
     std::string response = ":" + std::to_string(subscriber_count) + "\r\n";
     send(client_fd, response.c_str(), response.size(), 0);
     continue;
