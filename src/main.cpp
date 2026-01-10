@@ -2103,6 +2103,57 @@ else if (command == "RPUSH" && tokens.size() >= 3) {
     continue;
 }
 
+// ---------- LRANGE (Full Positive & Negative Support) ----------
+else if (command == "LRANGE" && tokens.size() >= 4) {
+    std::lock_guard<std::mutex> lock(list_mutex);
+    
+    std::string key = tokens[1];
+    int start = std::stoi(tokens[2]);
+    int stop = std::stoi(tokens[3]);
+
+    auto it = redis_lists.find(key);
+    if (it == redis_lists.end()) {
+        send(client_fd, "*0\r\n", 4, 0);
+        continue;
+    }
+
+    const std::deque<std::string>& list = it->second;
+    int list_len = static_cast<int>(list.size());
+
+    // 1. Convert negative indices to positive
+    // Formula: index = length + index
+    if (start < 0) start = list_len + start;
+    if (stop < 0) stop = list_len + stop;
+
+    // 2. Index Normalization and Edge Cases
+    // If after conversion start is still < 0, Redis treats it as 0
+    if (start < 0) start = 0;
+
+    // If start is beyond the end of the list, it's an empty range
+    if (start >= list_len || start > stop) {
+        send(client_fd, "*0\r\n", 4, 0);
+        continue;
+    }
+
+    // If stop is beyond the end of the list, cap it at the last element
+    if (stop >= list_len) stop = list_len - 1;
+
+    // 3. Extract the resulting range
+    std::vector<std::string> result;
+    for (int i = start; i <= stop; ++i) {
+        result.push_back(list[i]);
+    }
+
+    // 4. Encode as RESP Array
+    std::string response = "*" + std::to_string(result.size()) + "\r\n";
+    for (const auto& item : result) {
+        response += "$" + std::to_string(item.size()) + "\r\n" + item + "\r\n";
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
