@@ -1682,6 +1682,52 @@ else if (command == "GEOADD" && tokens.size() >= 5) {
     continue;
 }
 
+
+
+// ---------- GEOPOS ----------
+else if (command == "GEOPOS" && tokens.size() >= 3) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    int num_members = tokens.size() - 2;
+
+    // Start building the outer RESP array
+    std::string response = "*" + std::to_string(num_members) + "\r\n";
+
+    // Check if the key exists at all
+    auto it = sorted_sets.find(key);
+    bool key_exists = (it != sorted_sets.end());
+
+    for (int i = 0; i < num_members; ++i) {
+        std::string member_name = tokens[i + 2];
+        bool member_found = false;
+
+        if (key_exists) {
+            // Search for the member in the sorted set vector
+            for (const auto& entry : it->second) {
+                if (entry.member == member_name) {
+                    member_found = true;
+                    break;
+                }
+            }
+        }
+
+        if (member_found) {
+            // Location exists: Return sub-array ["0", "0"]
+            // *2\r\n       <- Sub-array of 2
+            // $1\r\n0\r\n  <- Longitude "0"
+            // $1\r\n0\r\n  <- Latitude "0"
+            response += "*2\r\n$1\r\n0\r\n$1\r\n0\r\n";
+        } else {
+            // Key or member missing: Return Null Array
+            response += "*-1\r\n";
+        }
+    }
+
+    send(client_fd, response.c_str(), response.size(), 0);
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
