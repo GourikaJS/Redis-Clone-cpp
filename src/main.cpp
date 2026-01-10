@@ -24,6 +24,8 @@
 std::string config_dir = ".";
 std::string config_dbfilename = "dump.rdb";
 
+std::unordered_map<std::string, long long> rdb_expiry;  // Store expiry times in milliseconds
+
 std::vector<std::string> rdb_keys;
 std::unordered_map<std::string, std::string> rdb_kv;
 
@@ -212,6 +214,20 @@ if (command == "GET" && tokens.size() == 2) {
     // 2️⃣ FALLBACK to RDB-loaded data
     auto rit = rdb_kv.find(key);
     if (rit != rdb_kv.end()) {
+        // Check if this RDB key has expired
+        auto expiry_it = rdb_expiry.find(key);
+        if (expiry_it != rdb_expiry.end()) {
+            long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            ).count();
+            
+            if (now >= expiry_it->second) {
+                // Key has expired
+                std::cerr << "RDB key " << key << " has expired\n";
+                return "$-1\r\n";
+            }
+        }
+        
         const std::string& v = rit->second;
         return "$" + std::to_string(v.size()) + "\r\n" +
                v + "\r\n";
@@ -220,7 +236,6 @@ if (command == "GET" && tokens.size() == 2) {
     // 3️⃣ Not found anywhere
     return "$-1\r\n";
 }
-
 
 
 
@@ -285,6 +300,8 @@ void load_rdb_file() {
         return 0;
     };
 
+    long long next_expiry_ms = -1;  // Track expiry for next key
+
     while (i < buf.size()) {
         unsigned char opcode = buf[i++];
 
@@ -295,7 +312,7 @@ void load_rdb_file() {
             size_t vlen = read_len(i);
             i += vlen;
         }
-        // RESIZEDB  ❗❗❗ THIS WAS MISSING
+        // RESIZEDB
         else if (opcode == 0xFB) {
             read_len(i); // hash table size
             read_len(i); // expire table size
@@ -304,12 +321,28 @@ void load_rdb_file() {
         else if (opcode == 0xFE) {
             read_len(i);
         }
-        // EXPIRETIME
+        // EXPIRETIME (seconds)
         else if (opcode == 0xFD) {
+            if (i + 4 > buf.size()) return;
+            uint32_t expiry_sec = 
+                buf[i] | (buf[i+1] << 8) | (buf[i+2] << 16) | (buf[i+3] << 24);
+            next_expiry_ms = expiry_sec * 1000LL;  // Convert to milliseconds
             i += 4;
+            std::cerr << "Found EXPIRETIME: " << expiry_sec << " seconds\n";
         }
-        // EXPIRETIME_MS
-      // STRING key-value
+        // EXPIRETIME_MS (milliseconds)
+        else if (opcode == 0xFC) {
+            if (i + 8 > buf.size()) return;
+            uint64_t expiry_ms = 
+                buf[i] | ((uint64_t)buf[i+1] << 8) | ((uint64_t)buf[i+2] << 16) | 
+                ((uint64_t)buf[i+3] << 24) | ((uint64_t)buf[i+4] << 32) | 
+                ((uint64_t)buf[i+5] << 40) | ((uint64_t)buf[i+6] << 48) | 
+                ((uint64_t)buf[i+7] << 56);
+            next_expiry_ms = expiry_ms;
+            i += 8;
+            std::cerr << "Found EXPIRETIME_MS: " << expiry_ms << " ms\n";
+        }
+        // STRING key-value
         else if (opcode == 0x00) {
             size_t key_len = read_len(i);
             std::string key(reinterpret_cast<char*>(&buf[i]), key_len);
@@ -319,14 +352,20 @@ void load_rdb_file() {
             std::string value(reinterpret_cast<char*>(&buf[i]), val_len);
             i += val_len;
 
-            // Store BOTH the key and the key-value pair
+            // Store the key and value
             rdb_keys.push_back(key);
             rdb_kv[key] = value;
             
-            std::cerr << "Loaded RDB key: " << key << " = " << value << "\n";
-            
-            // REMOVE THIS LINE - it stops after one key!
-            // continue;
+            // Store expiry if present
+            if (next_expiry_ms != -1) {
+                rdb_expiry[key] = next_expiry_ms;
+                std::cerr << "Loaded RDB key: " << key << " = " << value 
+                          << " (expires at " << next_expiry_ms << ")\n";
+                next_expiry_ms = -1;  // Reset for next key
+            } else {
+                std::cerr << "Loaded RDB key: " << key << " = " << value 
+                          << " (no expiry)\n";
+            }
         }
         // EOF
         else if (opcode == 0xFF) {
