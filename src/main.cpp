@@ -1888,6 +1888,25 @@ else if (command == "GEOSEARCH" && tokens.size() >= 7) {
 }
 
 
+// ---------- ACL ----------
+else if (command == "ACL" && tokens.size() >= 2) {
+    std::string sub_command = tokens[1];
+    std::transform(sub_command.begin(), sub_command.end(), sub_command.begin(), ::toupper);
+
+    if (sub_command == "WHOAMI") {
+        // Return "default" as a RESP Bulk String
+        // $7\r\n       <- Length of "default" is 7
+        // default\r\n
+        const char* response = "$7\r\ndefault\r\n";
+        send(client_fd, response, strlen(response), 0);
+    } else {
+        // Optional: Handle unknown ACL sub-commands
+        std::string err = "-ERR Unknown ACL subcommand '" + tokens[1] + "'\r\n";
+        send(client_fd, err.c_str(), err.size(), 0);
+    }
+    continue;
+}
+
     }
    {
     std::lock_guard<std::mutex> lock(replica_mutex);
