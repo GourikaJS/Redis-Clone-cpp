@@ -1349,7 +1349,7 @@ else if (command == "UNSUBSCRIBE") {
 }
 
 // ---------- ZADD ----------
-// ---------- ZADD ----------
+
 else if (command == "ZADD" && tokens.size() >= 4) {
     std::lock_guard<std::mutex> lock(zset_mutex);
     
@@ -1393,6 +1393,42 @@ else if (command == "ZADD" && tokens.size() >= 4) {
         send(client_fd, response.c_str(), response.size(), 0);
     }
     
+    continue;
+}
+
+// ---------- ZRANK ----------
+else if (command == "ZRANK" && tokens.size() == 3) {
+    std::lock_guard<std::mutex> lock(zset_mutex);
+    
+    std::string key = tokens[1];
+    std::string member = tokens[2];
+
+    // 1. Check if the sorted set exists
+    if (sorted_sets.find(key) == sorted_sets.end()) {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+        continue;
+    }
+
+    auto& zset = sorted_sets[key];
+    int rank = -1;
+
+    // 2. Find the member's index in the sorted vector
+    for (int i = 0; i < (int)zset.size(); ++i) {
+        if (zset[i].member == member) {
+            rank = i;
+            break;
+        }
+    }
+
+    // 3. Return the rank as an integer, or Nil if not found
+    if (rank != -1) {
+        std::string response = ":" + std::to_string(rank) + "\r\n";
+        send(client_fd, response.c_str(), response.size(), 0);
+    } else {
+        const char* nil = "$-1\r\n";
+        send(client_fd, nil, strlen(nil), 0);
+    }
     continue;
 }
 
