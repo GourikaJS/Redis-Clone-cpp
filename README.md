@@ -1,33 +1,75 @@
-<!-- [![progress-banner](https://backend.codecrafters.io/progress/redis/4d13e69a-2300-41cd-9327-b14ff1e50533)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+# Redis Clone (C++)
 
-This is a starting point for C++ solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+A lightweight Redis-inspired in-memory key-value database server implemented in C++. The project supports core Redis data structures, client-server communication over TCP, replication, persistence through RDB loading, and several commonly used Redis commands.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+## Features
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge. -->
+- TCP server with support for multiple client connections
+- RESP (Redis Serialization Protocol) request parsing
+- In-memory storage with optional key expiration (TTL)
+- RDB file loading during startup
+- Master-replica replication support
+- Basic Pub/Sub messaging
+- Transaction support
+- Authentication and ACL-based user management
 
-# Passing the first stage
+## Supported Data Structures
 
-The entry point for your Redis implementation is in `src/main.cpp`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+- Strings
+- Lists
+- Streams
+- Sorted Sets
+- Geospatial data (Geo)
+- Pub/Sub channels
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
+## Supported Commands
+
+- **Strings:** `PING`, `ECHO`, `SET`, `GET`, `INCR`, `TYPE`
+- **Lists:** `LPUSH`, `RPUSH`, `LPOP`, `LRANGE`, `LLEN`, `BLPOP`
+- **Streams:** `XADD`, `XRANGE`, `XREAD`
+- **Sorted Sets:** `ZADD`, `ZRANGE`, `ZRANK`, `ZCARD`, `ZSCORE`, `ZREM`
+- **Geo:** `GEOADD`, `GEOPOS`, `GEODIST`, `GEOSEARCH`
+- **Transactions:** `MULTI`, `EXEC`, `DISCARD`
+- **Replication & Server:** `INFO`, `REPLCONF`, `PSYNC`, `WAIT`, `CONFIG GET`, `KEYS`
+- **Pub/Sub:** `SUBSCRIBE`, `PUBLISH`, `UNSUBSCRIBE`
+- **Authentication:** `AUTH`, `ACL WHOAMI`, `ACL SETUSER`, `ACL GETUSER`
+
+## Tech Stack
+
+- C++23
+- CMake
+- OpenSSL (SHA-256)
+
+## Build
+
+```bash
+mkdir build
+cd build
+cmake ..
+cmake --build .
 ```
 
-That's all!
+## Run
 
-# Stage 2 & beyond
+### Start as a standalone server
 
-Note: This section is for stages 2 and beyond.
+```bash
+./redis-server --port 6379
+```
 
-1. Ensure you have `cmake` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `src/main.cpp`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+### Start as a replica
+
+```bash
+./redis-server --port 6380 --replicaof <master_host> <master_port>
+```
+
+## Project Structure
+
+```
+.
+├── src/
+│   └── main.cpp
+├── CMakeLists.txt
+├── vcpkg.json
+└── README.md
+```
